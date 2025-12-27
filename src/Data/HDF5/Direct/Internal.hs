@@ -195,16 +195,16 @@ bytesToWord32 _ bs =
 -- | Convert a list of bytes to a Word64 with specified byte order
 --   Returns Left if the byte list doesn't have exactly 8 elements
 bytesToWord64 :: ByteOrder -> [Word8] -> Either String Word64
-bytesToWord64 LittleEndian bs | length bs == 8 =
-  Right (fromIntegral (bs !! 0) .|. (fromIntegral (bs !! 1) `shiftL` 8) .|.
-         (fromIntegral (bs !! 2) `shiftL` 16) .|. (fromIntegral (bs !! 3) `shiftL` 24) .|.
-         (fromIntegral (bs !! 4) `shiftL` 32) .|. (fromIntegral (bs !! 5) `shiftL` 40) .|.
-         (fromIntegral (bs !! 6) `shiftL` 48) .|. (fromIntegral (bs !! 7) `shiftL` 56))
-bytesToWord64 BigEndian bs | length bs == 8 =
-  Right ((fromIntegral (bs !! 7) `shiftL` 56) .|. (fromIntegral (bs !! 6) `shiftL` 48) .|.
-         (fromIntegral (bs !! 5) `shiftL` 40) .|. (fromIntegral (bs !! 4) `shiftL` 32) .|.
-         (fromIntegral (bs !! 3) `shiftL` 24) .|. (fromIntegral (bs !! 2) `shiftL` 16) .|.
-         (fromIntegral (bs !! 1) `shiftL` 8) .|. fromIntegral (bs !! 0))
+bytesToWord64 LittleEndian [b0,b1,b2,b3,b4,b5,b6,b7] =
+  Right (fromIntegral b0 .|. (fromIntegral b1 `shiftL` 8) .|.
+         (fromIntegral b2 `shiftL` 16) .|. (fromIntegral b3 `shiftL` 24) .|.
+         (fromIntegral b4 `shiftL` 32) .|. (fromIntegral b5 `shiftL` 40) .|.
+         (fromIntegral b6 `shiftL` 48) .|. (fromIntegral b7 `shiftL` 56))
+bytesToWord64 BigEndian [b0,b1,b2,b3,b4,b5,b6,b7] =
+  Right ((fromIntegral b7 `shiftL` 56) .|. (fromIntegral b6 `shiftL` 48) .|.
+         (fromIntegral b5 `shiftL` 40) .|. (fromIntegral b4 `shiftL` 32) .|.
+         (fromIntegral b3 `shiftL` 24) .|. (fromIntegral b2 `shiftL` 16) .|.
+         (fromIntegral b1 `shiftL` 8) .|. fromIntegral b0)
 bytesToWord64 _ bs =
   Left $ "Expected 8 bytes for Word64, got " ++ show (length bs)
 

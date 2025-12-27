@@ -34,8 +34,9 @@ spec = do
       -- This represents: \137 H D F \r \n \032 \n
       let hdf5Signature = BL.pack [0x89, 0x48, 0x44, 0x46, 0x0D, 0x0A, 0x1A, 0x0A]
       BL.length hdf5Signature `shouldBe` 8
-      let firstByte = BL.head hdf5Signature
-      firstByte `shouldBe` 0x89
+      case BL.uncons hdf5Signature of
+        Just (firstByte, _) -> firstByte `shouldBe` 0x89
+        Nothing -> expectationFailure "Signature is empty"
 
   describe "Real HDF5 Files - Basic Structure" $ do
     it "can load be_data.h5 (big-endian test file)" $ do

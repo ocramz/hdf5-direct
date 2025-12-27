@@ -424,10 +424,9 @@ fromMassivArrayGeneric
   => [Int]              -- ^ Dimensions extracted from array
   -> [a]                -- ^ Array elements
   -> Either MassivError (HDF5Dataset a)
-fromMassivArrayGeneric dims elems
-  | null elems = Left EmptyArrayError
-  | otherwise = do
-      let sample = head elems
+fromMassivArrayGeneric dims elems = case elems of
+  [] -> Left EmptyArrayError
+  (sample:_) -> do
       dimStruct <- extractDimensions dims
       let metadata = ArrayMetadata
             { amDimensions = dimStruct
