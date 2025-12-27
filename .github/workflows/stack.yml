@@ -1,0 +1,132 @@
+name: Stack CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+jobs:
+  stack:
+    name: Stack Build and Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            cache-version: v1
+          - os: macos-latest
+            cache-version: v1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Haskell (Stack)
+        uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          enable-stack: true
+          stack-version: 'latest'
+          ghc-version: '9.10.3'
+
+      - name: Cache Stack
+        uses: actions/cache@v3
+        with:
+          path: ~/.stack
+          key: ${{ runner.os }}-stack-${{ hashFiles('stack.yaml', 'stack.yaml.lock') }}
+          restore-keys: ${{ runner.os }}-stack-
+
+      - name: Cache .stack-work
+        uses: actions/cache@v3
+        with:
+          path: .stack-work
+          key: ${{ runner.os }}-stack-work-${{ hashFiles('**/*.hs', 'stack.yaml') }}
+          restore-keys: ${{ runner.os }}-stack-work-
+
+      - name: Show Stack version
+        run: stack --version
+
+      - name: Download test files
+        run: |
+          chmod +x download-test-files.sh
+          ./download-test-files.sh
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: Test verbose output
+        if: failure()
+        run: make test-verbose
+
+  test-matrix:
+    name: Test Coverage - ${{ matrix.test-suite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test-suite:
+          - unit
+          - integration
+          - coverage
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Haskell (Stack)
+        uses: haskell-actions/setup@v2
+        with:
+          enable-stack: true
+          stack-version: 'latest'
+
+      - name: Cache Stack
+        uses: actions/cache@v3
+        with:
+          path: ~/.stack
+          key: ${{ runner.os }}-stack-${{ matrix.test-suite }}-${{ hashFiles('stack.yaml', 'stack.yaml.lock') }}
+
+      - name: Download test files
+        run: |
+          chmod +x download-test-files.sh
+          ./download-test-files.sh
+
+      - name: Run unit tests
+        if: matrix.test-suite == 'unit'
+        run: make test-unit
+
+      - name: Run integration tests
+        if: matrix.test-suite == 'integration'
+        run: make test-integration
+
+      - name: Run with coverage
+        if: matrix.test-suite == 'coverage'
+        run: make coverage
+
+  quick-check:
+    name: Quick Sanity Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Haskell (Stack)
+        uses: haskell-actions/setup@v2
+        with:
+          enable-stack: true
+
+      - name: Quick build and test
+        run: make quick
+
+      - name: Show status
+        run: make status
+
+      - name: Project info
+        run: make info
