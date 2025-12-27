@@ -11,6 +11,10 @@ module Data.HDF5.Direct.Internal
   , mmapFileRegion
   , openMmapFile
   , closeMmapFile
+    -- * File write operations
+  , writeHDF5File
+  , appendToFile
+  , writeByteString
     -- * HDF5 Datatype classes
   , HDF5Datatype(..)
   , ByteOrder(..)
@@ -53,8 +57,10 @@ import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Get (Get)
 import qualified Data.Binary.Get as Get
+import Data.Binary.Put (Put, runPut)
 import Data.Bits (shiftL, (.|.))
 import Foreign.ForeignPtr (ForeignPtr)
+import System.IO (withFile, IOMode(WriteMode, AppendMode), hFlush)
 import System.IO.MMap (Mode(ReadOnly), mmapFileByteStringLazy, mmapFileForeignPtr)
 import GHC.Generics (Generic)
 
@@ -112,6 +118,46 @@ mmapFileRegion
 mmapFileRegion path range =
   catch (mmapFileByteStringLazy path range)
         (\(ex :: SomeException) -> throwIO $ MmapIOError ("Failed to mmap region: " ++ displayException ex))
+
+-- | Write a lazy ByteString to a file, overwriting if it exists
+--
+--   Creates the file if it doesn't exist, truncates if it does.
+--   Throws HDF5Exception on I/O errors.
+writeHDF5File
+  :: FilePath
+  -> ByteString
+  -> IO ()
+writeHDF5File path content = 
+  catch (do
+    withFile path WriteMode $ \handle -> do
+      BL.hPutStr handle content
+      hFlush handle
+  ) (\(ex :: SomeException) -> throwIO $ MmapIOError ("Failed to write " ++ path ++ ": " ++ displayException ex))
+
+-- | Append a lazy ByteString to an existing file
+--
+--   If the file doesn't exist, creates it with the content.
+--   Throws HDF5Exception on I/O errors.
+appendToFile
+  :: FilePath
+  -> ByteString
+  -> IO ()
+appendToFile path content =
+  catch (do
+    withFile path AppendMode $ \handle -> do
+      BL.hPutStr handle content
+      hFlush handle
+  ) (\(ex :: SomeException) -> throwIO $ MmapIOError ("Failed to append to " ++ path ++ ": " ++ displayException ex))
+
+-- | Write a lazy ByteString using the provided binary Put serializer
+--
+--   Combines serialization and file write into one operation.
+writeByteString
+  :: FilePath
+  -> Put
+  -> IO ()
+writeByteString path putter =
+  writeHDF5File path (runPut putter)
 
 -- ============================================================================
 -- HDF5 Datatype Classes (per HDF5 1.8.7 spec)

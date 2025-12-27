@@ -60,6 +60,7 @@ test-suite spec
   main-is:             Spec.hs
   other-modules:       LibSpec
                      , IntegrationSpec
+                     , QuickCheckSpec
   build-depends:       base
                      , hdf5-direct
                      , hspec
