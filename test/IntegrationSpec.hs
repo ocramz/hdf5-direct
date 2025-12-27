@@ -7,9 +7,9 @@ module IntegrationSpec
 import Test.Hspec
 import qualified Data.ByteString.Lazy as BL
 import Data.Word ()
-import Control.Exception (catch)
-import System.Directory (doesFileExist, listDirectory)
-import System.FilePath (takeExtension)
+import Control.Exception (catch, try, SomeException)
+import System.Directory (doesFileExist, listDirectory, doesDirectoryExist)
+import System.FilePath (takeExtension, (</>))
 
 import Data.HDF5.Direct.Internal
   ( HDF5Exception(..)
@@ -20,6 +20,10 @@ import Data.HDF5.Direct.Internal
   , FixedPointType(..)
   , VariableLengthType(..)
   )
+
+-- Helper for try with proper type inference
+tryHDF5 :: IO a -> IO (Either HDF5Exception a)
+tryHDF5 action = fmap Right action `catch` (\(e :: HDF5Exception) -> return (Left e))
 
 -- | Test suite for integration with real HDF5 files from the HDFGroup repository
 spec :: Spec
@@ -33,14 +37,14 @@ spec = do
       let firstByte = BL.head hdf5Signature
       firstByte `shouldBe` 0x89
 
-  describe "Real HDF5 Files" $ do
+  describe "Real HDF5 Files - Basic Structure" $ do
     it "can load be_data.h5 (big-endian test file)" $ do
       let testPath = "test-data/be_data.h5"
       exists <- doesFileExist testPath
       if not exists
         then pendingWith "be_data.h5 not available - run download-test-files.sh"
         else do
-          result <- try (withMmapFile testPath (\_ -> return ()))
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
           case result of
             Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
             Right () -> pure ()
@@ -51,40 +55,144 @@ spec = do
       if not exists
         then pendingWith "le_data.h5 not available - run download-test-files.sh"
         else do
-          result <- try (withMmapFile testPath (\_ -> return ()))
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
           case result of
             Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
             Right () -> pure ()
 
-    it "verifies HDF5 signature in be_data.h5" $ do
-      let testPath = "test-data/be_data.h5"
-      exists <- doesFileExist testPath
-      if not exists
-        then pendingWith "be_data.h5 not available"
-        else do
-          result <- try (withMmapFile testPath (\_ -> return ()))
-          case result of
-            Left _ -> expectationFailure "Failed to mmap be_data.h5"
-            Right () -> pure ()
-
+  describe "Real HDF5 Files - Datatype Tests" $ do
     it "can load charsets.h5 (string charset test file)" $ do
       let testPath = "test-data/charsets.h5"
       exists <- doesFileExist testPath
       if not exists
         then pendingWith "charsets.h5 not available - run download-test-files.sh"
         else do
-          result <- try (withMmapFile testPath (\_ -> return ()))
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
           case result of
             Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
             Right () -> pure ()
 
+    it "can load bitops.h5 (bitfield operations)" $ do
+      let testPath = "test-data/bitops.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "bitops.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+    it "can load dtype_attr.h5 (datatype attributes)" $ do
+      let testPath = "test-data/dtype_attr.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "dtype_attr.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+  describe "Real HDF5 Files - Complex Structures" $ do
     it "can load aggr.h5 (aggregated data structure)" $ do
       let testPath = "test-data/aggr.h5"
       exists <- doesFileExist testPath
       if not exists
         then pendingWith "aggr.h5 not available - run download-test-files.sh"
         else do
-          result <- try (withMmapFile testPath (\_ -> return ()))
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+    it "can load array.h5 (array datatypes)" $ do
+      let testPath = "test-data/array.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "array.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+    it "can load enum.h5 (enumeration datatypes)" $ do
+      let testPath = "test-data/enum.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "enum.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+  describe "Real HDF5 Files - Attributes" $ do
+    it "can load attr.h5 (attribute test file)" $ do
+      let testPath = "test-data/attr.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "attr.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+    it "can load attrib.h5 (additional attributes)" $ do
+      let testPath = "test-data/attrib.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "attrib.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+  describe "Real HDF5 Files - Datasets" $ do
+    it "can load dataset.h5 (dataset structure tests)" $ do
+      let testPath = "test-data/dataset.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "dataset.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+    it "can load simple.h5 (simple dataset)" $ do
+      let testPath = "test-data/simple.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "simple.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+  describe "Real HDF5 Files - Groups" $ do
+    it "can load group.h5 (group operations)" $ do
+      let testPath = "test-data/group.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "group.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
+          case result of
+            Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
+            Right () -> pure ()
+
+    it "can load groups.h5 (multiple groups)" $ do
+      let testPath = "test-data/groups.h5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "groups.h5 not available"
+        else do
+          result <- tryHDF5 (withMmapFile testPath (\_ -> return ()))
           case result of
             Left (e :: HDF5Exception) -> expectationFailure $ "Failed to load: " ++ show e
             Right () -> pure ()
@@ -92,13 +200,26 @@ spec = do
   describe "File Structure Reading" $ do
     it "can enumerate available test files" $ do
       let testDataDir = "test-data"
-      exists <- doesFileExist testDataDir
-      if not exists
+      dirExists <- doesDirectoryExist testDataDir
+      if not dirExists
         then pendingWith "test-data directory not found"
         else do
           files <- listDirectory testDataDir
           let hdf5Files = filter (\f -> takeExtension f == ".h5") files
           length hdf5Files `shouldSatisfy` (> 0)
+
+    it "provides count of available HDF5 test files" $ do
+      let testDataDir = "test-data"
+      dirExists <- doesDirectoryExist testDataDir
+      if not dirExists
+        then pendingWith "test-data directory not found"
+        else do
+          files <- listDirectory testDataDir
+          let hdf5Files = filter (\f -> takeExtension f == ".h5") files
+          putStrLn $ "\nAvailable HDF5 test files: " ++ show (length hdf5Files)
+          if length hdf5Files > 0
+            then putStrLn $ "  Files: " ++ unwords hdf5Files
+            else putStrLn "  (No files - run download-test-files.sh)"
 
   describe "Superblock Parsing" $ do
     it "extracts superblock version information" $ do
@@ -152,11 +273,19 @@ spec = do
   describe "Error Handling" $ do
     it "reports missing files gracefully" $ do
       let missingPath = "/nonexistent/path/to/file.h5"
-      result <- try (withMmapFile missingPath (\_ -> return ()))
+      result <- tryHDF5 (withMmapFile missingPath (\_ -> return ()))
       case result of
         Left (e :: HDF5Exception) -> show e `shouldContain` "Failed to mmap"
         Right () -> expectationFailure "Should have failed on missing file"
 
--- Helper for try with proper type inference
-try :: IO a -> IO (Either HDF5Exception a)
-try action = fmap Right action `catch` (\(e :: HDF5Exception) -> return (Left e))
+    it "can mmap files regardless of content validity" $ do
+      -- The mmap call itself doesn't validate HDF5 structure,
+      -- it just maps the file into memory. Validation happens at parse time.
+      -- This test verifies that mmap succeeds for any readable file.
+      let tempPath = "test-data/invalid.h5"
+      writeFile tempPath "This is not an HDF5 file"
+      result <- tryHDF5 (withMmapFile tempPath (\_ -> return ()))
+      case result of
+        Left (e :: HDF5Exception) -> expectationFailure $ "mmap should succeed for readable file: " ++ show e
+        Right () -> pure ()  -- Expected - mmap doesn't validate HDF5 format
+
