@@ -15,6 +15,13 @@ module Data.HDF5.Direct.Internal
   , writeHDF5File
   , appendToFile
   , writeByteString
+    -- * Byte marshalling utilities
+  , bytesToWord16
+  , bytesToWord32
+  , bytesToWord64
+  , word16ToBytes
+  , word32ToBytes
+  , word64ToBytes
     -- * HDF5 Datatype classes
   , HDF5Datatype(..)
   , ByteOrder(..)
@@ -51,14 +58,14 @@ module Data.HDF5.Direct.Internal
   ) where
 
 import Control.Exception (Exception, bracket, catch, throwIO, SomeException, displayException)
-import Data.Word (Word8, Word32, Word64)
+import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Int (Int64)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Get (Get)
 import qualified Data.Binary.Get as Get
 import Data.Binary.Put (Put, runPut)
-import Data.Bits (shiftL, (.|.))
+import Data.Bits (shiftL, shiftR, (.|.))
 import Foreign.ForeignPtr (ForeignPtr)
 import System.IO (withFile, IOMode(WriteMode, AppendMode), hFlush)
 import System.IO.MMap (Mode(ReadOnly), mmapFileByteStringLazy, mmapFileForeignPtr)
@@ -158,6 +165,75 @@ writeByteString
   -> IO ()
 writeByteString path putter =
   writeHDF5File path (runPut putter)
+
+-- ============================================================================
+-- Byte Marshalling Utilities
+-- ============================================================================
+
+-- | Convert a list of bytes to a Word16 with specified byte order
+--   Returns Left if the byte list doesn't have exactly 2 elements
+bytesToWord16 :: ByteOrder -> [Word8] -> Either String Word16
+bytesToWord16 LittleEndian [b0, b1] =
+  Right (fromIntegral b0 .|. (fromIntegral b1 `shiftL` 8))
+bytesToWord16 BigEndian [b1, b0] =
+  Right ((fromIntegral b1 `shiftL` 8) .|. fromIntegral b0)
+bytesToWord16 _ bs =
+  Left $ "Expected 2 bytes for Word16, got " ++ show (length bs)
+
+-- | Convert a list of bytes to a Word32 with specified byte order
+--   Returns Left if the byte list doesn't have exactly 4 elements
+bytesToWord32 :: ByteOrder -> [Word8] -> Either String Word32
+bytesToWord32 LittleEndian [b0, b1, b2, b3] =
+  Right (fromIntegral b0 .|. (fromIntegral b1 `shiftL` 8) .|.
+         (fromIntegral b2 `shiftL` 16) .|. (fromIntegral b3 `shiftL` 24))
+bytesToWord32 BigEndian [b3, b2, b1, b0] =
+  Right ((fromIntegral b3 `shiftL` 24) .|. (fromIntegral b2 `shiftL` 16) .|.
+         (fromIntegral b1 `shiftL` 8) .|. fromIntegral b0)
+bytesToWord32 _ bs =
+  Left $ "Expected 4 bytes for Word32, got " ++ show (length bs)
+
+-- | Convert a list of bytes to a Word64 with specified byte order
+--   Returns Left if the byte list doesn't have exactly 8 elements
+bytesToWord64 :: ByteOrder -> [Word8] -> Either String Word64
+bytesToWord64 LittleEndian bs | length bs == 8 =
+  Right (fromIntegral (bs !! 0) .|. (fromIntegral (bs !! 1) `shiftL` 8) .|.
+         (fromIntegral (bs !! 2) `shiftL` 16) .|. (fromIntegral (bs !! 3) `shiftL` 24) .|.
+         (fromIntegral (bs !! 4) `shiftL` 32) .|. (fromIntegral (bs !! 5) `shiftL` 40) .|.
+         (fromIntegral (bs !! 6) `shiftL` 48) .|. (fromIntegral (bs !! 7) `shiftL` 56))
+bytesToWord64 BigEndian bs | length bs == 8 =
+  Right ((fromIntegral (bs !! 7) `shiftL` 56) .|. (fromIntegral (bs !! 6) `shiftL` 48) .|.
+         (fromIntegral (bs !! 5) `shiftL` 40) .|. (fromIntegral (bs !! 4) `shiftL` 32) .|.
+         (fromIntegral (bs !! 3) `shiftL` 24) .|. (fromIntegral (bs !! 2) `shiftL` 16) .|.
+         (fromIntegral (bs !! 1) `shiftL` 8) .|. fromIntegral (bs !! 0))
+bytesToWord64 _ bs =
+  Left $ "Expected 8 bytes for Word64, got " ++ show (length bs)
+
+-- | Convert a Word16 to a list of bytes with specified byte order
+word16ToBytes :: ByteOrder -> Word16 -> [Word8]
+word16ToBytes LittleEndian w =
+  [fromIntegral w, fromIntegral (w `shiftR` 8)]
+word16ToBytes BigEndian w =
+  [fromIntegral (w `shiftR` 8), fromIntegral w]
+
+-- | Convert a Word32 to a list of bytes with specified byte order
+word32ToBytes :: ByteOrder -> Word32 -> [Word8]
+word32ToBytes LittleEndian w =
+  [fromIntegral w, fromIntegral (w `shiftR` 8),
+   fromIntegral (w `shiftR` 16), fromIntegral (w `shiftR` 24)]
+word32ToBytes BigEndian w =
+  [fromIntegral (w `shiftR` 24), fromIntegral (w `shiftR` 16),
+   fromIntegral (w `shiftR` 8), fromIntegral w]
+
+-- | Convert a Word64 to a list of bytes with specified byte order
+word64ToBytes :: ByteOrder -> Word64 -> [Word8]
+word64ToBytes LittleEndian w =
+  [fromIntegral w, fromIntegral (w `shiftR` 8), fromIntegral (w `shiftR` 16),
+   fromIntegral (w `shiftR` 24), fromIntegral (w `shiftR` 32), fromIntegral (w `shiftR` 40),
+   fromIntegral (w `shiftR` 48), fromIntegral (w `shiftR` 56)]
+word64ToBytes BigEndian w =
+  [fromIntegral (w `shiftR` 56), fromIntegral (w `shiftR` 48), fromIntegral (w `shiftR` 40),
+   fromIntegral (w `shiftR` 32), fromIntegral (w `shiftR` 24), fromIntegral (w `shiftR` 16),
+   fromIntegral (w `shiftR` 8), fromIntegral w]
 
 -- ============================================================================
 -- HDF5 Datatype Classes (per HDF5 1.8.7 spec)

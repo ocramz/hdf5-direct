@@ -20,10 +20,13 @@ library
   default-language:    Haskell2010
   hs-source-dirs:      src
   exposed-modules:     Data.HDF5.Direct.Internal
+                     , Data.HDF5.Direct.Massiv
   build-depends:       base >= 4.7 && < 5
                      , bytestring >= 0.10 && < 0.13
                      , binary >= 0.8 && < 0.9
                      , mmap >= 0.5 && < 0.6
+                     , massiv >= 1.0 && < 1.1
+                     , vector >= 0.12 && < 0.14
   ghc-options:         -Wall
                        -Wcompat
                        -Widentities
@@ -61,6 +64,7 @@ test-suite spec
   other-modules:       LibSpec
                      , IntegrationSpec
                      , QuickCheckSpec
+                     , MassivMultidimSpec
   build-depends:       base
                      , hdf5-direct
                      , hspec
@@ -68,6 +72,7 @@ test-suite spec
                      , bytestring >= 0.10 && < 0.13
                      , binary >= 0.8 && < 0.9
                      , mmap >= 0.5 && < 0.6
+                     , massiv >= 1.0 && < 1.1
                      , directory
                      , filepath
   ghc-options:         -Wall
