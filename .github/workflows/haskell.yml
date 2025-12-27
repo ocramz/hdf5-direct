@@ -70,25 +70,6 @@ jobs:
       - name: Generate documentation
         run: make docs-gen
 
-  lint:
-    name: Code Quality
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Haskell
-        uses: haskell-actions/setup@v2
-        with:
-          ghc-version: '9.10.1'
-
-      - name: Install HLint
-        run: cabal install hlint
-
-      - name: Run HLint
-        run: hlint src test
-        continue-on-error: true
-
   coverage:
     name: Test Coverage
     runs-on: ubuntu-latest

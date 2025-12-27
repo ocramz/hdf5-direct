@@ -1,6 +1,5 @@
 # hdf5-direct
 
-[![Build Status](https://travis-ci.org/ocramz/hdf5-direct.png)](https://travis-ci.org/ocramz/hdf5-direct)
 [![Quick Check](https://github.com/ocramz/hdf5-direct/workflows/Quick%20Check/badge.svg)](https://github.com/ocramz/hdf5-direct/actions/workflows/quick-check.yml)
 [![Stack CI](https://github.com/ocramz/hdf5-direct/workflows/Stack%20CI/badge.svg)](https://github.com/ocramz/hdf5-direct/actions/workflows/stack.yml)
 [![Haskell CI](https://github.com/ocramz/hdf5-direct/workflows/Haskell%20CI/badge.svg)](https://github.com/ocramz/hdf5-direct/actions/workflows/haskell.yml)
