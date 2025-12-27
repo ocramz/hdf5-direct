@@ -15,12 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         include:
           - os: ubuntu-latest
             cache-version: v1
-          - os: macos-latest
-            cache-version: v1
+        #   - os: macos-latest
+        #     cache-version: v1
 
     steps:
       - name: Checkout code
