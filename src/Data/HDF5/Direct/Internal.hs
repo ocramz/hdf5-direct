@@ -9,6 +9,8 @@ module Data.HDF5.Direct.Internal
   , MmapFile(..)
   , withMmapFile
   , mmapFileRegion
+  , openMmapFile
+  , closeMmapFile
     -- * HDF5 Datatype classes
   , HDF5Datatype(..)
   , ByteOrder(..)
@@ -27,20 +29,33 @@ module Data.HDF5.Direct.Internal
   , VariableLengthType(..)
   , ArrayType(..)
   , DatatypeClass(..)
+    -- * Binary parsers for HDF5 Datatypes
+  , parseByteOrder
+  , parsePaddingType
+  , parseCharacterSet
+  , getBits
+  , parseFixedPoint
+  , parseFloatingPoint
+  , parseTime
+  , parseString
+  , parseBitfield
+  , parseOpaque
+  , parseEnumeration
+  , parseCompound
+  , parseVariableLength
+  , parseArray
   ) where
 
 import Control.Exception (Exception, bracket, catch, throwIO, SomeException, displayException)
 import Data.Word (Word8, Word32, Word64)
-import Data.Int (Int32, Int64)
+import Data.Int (Int64)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString as BS
 import Data.Binary.Get (Get)
 import qualified Data.Binary.Get as Get
-import Data.Bits ((.&.), shiftL, (.|.))
-import Foreign.Ptr (Ptr)
-import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
-import System.IO.MMap (Mode(ReadOnly), mmapFileByteStringLazy, mmapFileForeignPtr, munmapFilePtr)
+import Data.Bits (shiftL, (.|.))
+import Foreign.ForeignPtr (ForeignPtr)
+import System.IO.MMap (Mode(ReadOnly), mmapFileByteStringLazy, mmapFileForeignPtr)
 import GHC.Generics (Generic)
 
 -- | Exception type for HDF5 parsing and I/O errors
@@ -69,8 +84,8 @@ withMmapFile
   :: FilePath
   -> (MmapFile -> IO a)
   -> IO a
-withMmapFile path action = 
-  bracket (openMmapFile path) closeMmapFile action
+withMmapFile path = 
+  bracket (openMmapFile path) closeMmapFile
 
 -- | Open a file for mmap-based lazy reading
 openMmapFile :: FilePath -> IO MmapFile
@@ -277,7 +292,7 @@ parseFixedPoint size = do
 parseFloatingPoint :: Int -> Get FloatingPointType
 parseFloatingPoint size = do
   classBits0 <- Get.getWord8
-  classBits1 <- Get.getWord8
+  _ <- Get.getWord8
   let byteOrder = parseByteOrder (fromIntegral (classBits0 `div` 1) `mod` 2)
   bitOffset <- Get.getWord16be
   bitPrecision <- Get.getWord16be
@@ -351,7 +366,7 @@ parseEnumeration :: Int -> Get EnumerationType
 parseEnumeration _ = do
   classBits0 <- Get.getWord8
   classBits1 <- Get.getWord8
-  let numMembers = ((fromIntegral classBits1 :: Int) `shiftL` 8) .|. fromIntegral classBits0
+  let _ = ((fromIntegral classBits1 :: Int) `shiftL` 8) .|. fromIntegral classBits0
   -- For now, return a placeholder; full implementation requires recursive type parsing
   -- and is deferred to a complete binary parser implementation
   return $ EnumerationType (HDF5Datatype 0 (ClassFixedPoint (FixedPointType LittleEndian False 0 8 1))) []
@@ -361,7 +376,7 @@ parseCompound :: Int -> Get CompoundType
 parseCompound size = do
   classBits0 <- Get.getWord8
   classBits1 <- Get.getWord8
-  let numMembers = ((fromIntegral classBits1 :: Int) `shiftL` 8) .|. fromIntegral classBits0
+  let _ = ((fromIntegral classBits1 :: Int) `shiftL` 8) .|. fromIntegral classBits0
   -- Full implementation deferred: requires recursive member parsing
   return $ CompoundType [] size
 

@@ -7,15 +7,14 @@ module LibSpec
 
 import Test.Hspec
 import qualified Data.ByteString.Lazy as BL
-import Data.Binary.Get (runGet)
-import Data.Word (Word8, Word32)
-import Control.Exception (try, SomeException)
+import Data.Binary.Get ()
+import Data.Word ()
+import Control.Exception (try)
 
 import Data.HDF5.Direct.Internal
   ( HDF5Exception(..)
   , MmapFile(..)
   , withMmapFile
-  , mmapFileRegion
   , HDF5Datatype(..)
   , DatatypeClass(..)
   , FixedPointType(..)

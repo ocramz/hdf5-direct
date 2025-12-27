@@ -6,10 +6,10 @@ module IntegrationSpec
 
 import Test.Hspec
 import qualified Data.ByteString.Lazy as BL
-import Data.Word (Word8)
-import Control.Exception (catch, SomeException)
+import Data.Word ()
+import Control.Exception (catch)
 import System.Directory (doesFileExist, listDirectory)
-import System.FilePath ((</>), takeExtension)
+import System.FilePath (takeExtension)
 
 import Data.HDF5.Direct.Internal
   ( HDF5Exception(..)
