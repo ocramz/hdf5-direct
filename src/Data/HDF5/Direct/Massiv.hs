@@ -50,8 +50,8 @@ module Data.HDF5.Direct.Massiv
     -- * HDF5 Metadata discovery
   , HDF5Superblock(..)
   , HDF5DatasetInfo(..)
-  , parseSuperblockMetadata
-  , discoverAllDatasets
+  , discoverDatasets
+  , discoverDatasetsFromFile
     -- * Re-exported Massiv types
   , module Data.Massiv.Array
   ) where
@@ -75,6 +75,7 @@ import Data.HDF5.Direct.Internal
   , HDF5DatasetInfo(..)
   , parseSuperblockVersion
   , discoverDatasets
+  , discoverDatasetsFromFile
   )
 
 import qualified Data.Massiv.Array as M
@@ -610,14 +611,7 @@ writeArrayAsDataset3D path arr =
 -- HDF5 Metadata Discovery API
 -- ============================================================================
 
--- | Parse superblock metadata from an HDF5 file
-parseSuperblockMetadata :: BL.ByteString -> Either String HDF5Superblock
-parseSuperblockMetadata bs =
-  case parseSuperblockVersion bs of
-    Just sb -> Right sb
-    Nothing -> Left "Failed to parse superblock - invalid HDF5 signature or file too short"
-
--- | Discover all datasets in an HDF5 file
---   Uses heuristic scanning to find dataset metadata
-discoverAllDatasets :: BL.ByteString -> [HDF5DatasetInfo]
-discoverAllDatasets = discoverDatasets
+-- | The unified dataset discovery function (re-exported from Internal)
+-- This is the single authoritative implementation for discovering datasets
+-- in HDF5 files. Both discoverDatasets (pure) and discoverDatasetsFromFile (IO)
+-- converge on the same logic.

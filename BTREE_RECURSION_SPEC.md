@@ -1,0 +1,30 @@
+-- | Enhanced B-tree parsing with support for internal nodes
+--
+-- HDF5 v1 B-tree format:
+--
+-- LEAF NODE (nodeLevel = 0):
+--   - Header (8 bytes): sig="TREE" (4), type (1), level (1), nEntries (2)
+--   - Entries (variable size, depends on node type):
+--     Group Node (type 0):
+--       - 8 bytes: Object header address
+--       - 8 bytes: Cache type
+--       - 4 bytes: Name length
+--       - N bytes: Name in local heap
+--     Dataset Node (type 1):
+--       - 8 bytes: Object header address
+--       - 8 bytes: Cache type
+--       - 4 bytes: Name length  
+--       - N bytes: Name in local heap
+--
+-- INTERNAL NODE (nodeLevel > 0):
+--   - Header (8 bytes): sig="TREE" (4), type (1), level (1), nEntries (2)
+--   - Child pointers: Array of child node addresses
+--     Each entry: 8 bytes: Child B-tree node address + key value
+--
+-- Entry structure for internal nodes:
+--   For each of nEntries + 1 children:
+--     - 8 bytes: Child node address
+--   Then for each of nEntries keys:
+--     - Key format depends on node type (group or dataset)
+--
+-- This is a description of what we need to implement.

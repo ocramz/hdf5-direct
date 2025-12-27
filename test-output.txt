@@ -1,0 +1,513 @@
+hdf5-direct-0.1.0.0: unregistering (dependencies changed)
+hdf5-direct> configure (lib + exe + test)
+Configuring hdf5-direct-0.1.0.0...
+hdf5-direct> build (lib + exe + test) with ghc-9.10.3
+Preprocessing library for hdf5-direct-0.1.0.0...
+Building library for hdf5-direct-0.1.0.0...
+[1 of 2] Compiling Data.HDF5.Direct.Internal
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:80:36: warning: [GHC-38856] [-Wunused-imports]
+    The import of ‘nubBy, tails’ from module ‘Data.List’ is redundant
+   |
+80 | import Data.List (isSubsequenceOf, tails, nub, nubBy)
+   |                                    ^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:81:20: warning: [GHC-38856] [-Wunused-imports]
+    The import of ‘fromMaybe’ from module ‘Data.Maybe’ is redundant
+   |
+81 | import Data.Maybe (fromMaybe, catMaybes)
+   |                    ^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:87:41: warning: [GHC-38856] [-Wunused-imports]
+    The import of ‘getFileSize’
+    from module ‘System.Directory’ is redundant
+   |
+87 | import System.Directory (doesFileExist, getFileSize)
+   |                                         ^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:576:38: warning: [GHC-63394] [-Wx-partial]
+    In the use of ‘head’
+    (imported from Prelude, but defined in GHC.Internal.List):
+    "This is a partial function, it throws an error on empty lists. Use pattern matching, 'Data.List.uncons' or 'Data.Maybe.listToMaybe' instead. Consider refactoring to use "Data.List.NonEmpty"."
+    |
+576 |   in isReasonable && (hasKeyword || (head s `elem` ['a'..'z'] ++ ['A'..'Z'] ++ "_"))
+    |                                      ^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:610:1: warning: [GHC-40910] [-Wunused-top-binds]
+    Defined but not used: ‘convertWord32’
+    |
+610 | convertWord32 LittleEndian bs
+    | ^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:613:9: warning: [GHC-62161] [-Wincomplete-uni-patterns]
+    Pattern match(es) are non-exhaustive
+    In a pattern binding:
+        Patterns of type ‘[Word32]’ not matched:
+            []
+            [_]
+            [_, _]
+            [_, _, _]
+            ...
+    |
+613 |     let [b0, b1, b2, b3] = map (fromIntegral . fromIntegral) (BL.unpack (BL.take 4 bs)) :: [Word32]
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:613:33: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘b0’ to type ‘Integer’ in the following constraints
+        (Integral b0)
+          arising from a use of ‘fromIntegral’
+          at src/Data/HDF5/Direct/Internal.hs:613:33-44
+        (Num b0)
+          arising from a use of ‘fromIntegral’
+          at src/Data/HDF5/Direct/Internal.hs:613:48-59
+    • In the first argument of ‘(.)’, namely ‘fromIntegral’
+      In the first argument of ‘map’, namely
+        ‘(fromIntegral . fromIntegral)’
+      In the expression:
+          map (fromIntegral . fromIntegral) (BL.unpack (BL.take 4 bs)) ::
+            [Word32]
+    |
+613 |     let [b0, b1, b2, b3] = map (fromIntegral . fromIntegral) (BL.unpack (BL.take 4 bs)) :: [Word32]
+    |                                 ^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:618:9: warning: [GHC-62161] [-Wincomplete-uni-patterns]
+    Pattern match(es) are non-exhaustive
+    In a pattern binding:
+        Patterns of type ‘[Word32]’ not matched:
+            []
+            [_]
+            [_, _]
+            [_, _, _]
+            ...
+    |
+618 |     let [b3,b2,b1,b0] = map fromIntegral (BL.unpack (BL.take 4 bs)) :: [Word32]
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:627:9: warning: [GHC-62161] [-Wincomplete-uni-patterns]
+    Pattern match(es) are non-exhaustive
+    In a pattern binding:
+        Patterns of type ‘[Word64]’ not matched:
+            []
+            [_]
+            [_, _]
+            [_, _, _]
+            ...
+    |
+627 |         [b0,b1,b2,b3,b4,b5,b6,b7] = map fromIntegral (BL.unpack bytes) :: [Word64]
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:634:9: warning: [GHC-62161] [-Wincomplete-uni-patterns]
+    Pattern match(es) are non-exhaustive
+    In a pattern binding:
+        Patterns of type ‘[Word64]’ not matched:
+            []
+            [_]
+            [_, _]
+            [_, _, _]
+            ...
+    |
+634 |         [b0,b1,b2,b3,b4,b5,b6,b7] = map fromIntegral (BL.unpack bytes) :: [Word64]
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:752:9: warning: [GHC-62161] [-Wincomplete-uni-patterns]
+    Pattern match(es) are non-exhaustive
+    In a pattern binding:
+        Patterns of type ‘[Word8]’ not matched:
+            []
+            [_]
+            (_:_:_:_)
+    |
+752 |     let [b0, b1] = BL.unpack (BL.take 2 (BL.drop (fromIntegral off) bs))
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:758:1: warning: [GHC-40910] [-Wunused-top-binds]
+    Defined but not used: ‘word32LEAt’
+    |
+758 | word32LEAt bs off
+    | ^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:817:1: warning: [GHC-40910] [-Wunused-top-binds]
+    Defined but not used: ‘parseSymbolTableMessage’
+    |
+817 | parseSymbolTableMessage fileData offset
+    | ^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:818:39: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘a0’ to type ‘Integer’ in the following constraints
+        (Ord a0)
+          arising from a use of ‘<’
+          at src/Data/HDF5/Direct/Internal.hs:818:39
+        (Num a0)
+          arising from a use of ‘fromIntegral’
+          at src/Data/HDF5/Direct/Internal.hs:818:5-16
+    • In the expression:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 16
+      In a stmt of a pattern guard for
+                     an equation for ‘parseSymbolTableMessage’:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 16
+      In an equation for ‘parseSymbolTableMessage’:
+          parseSymbolTableMessage fileData offset
+            | fromIntegral (BL.length fileData) < fromIntegral offset + 16
+            = Nothing
+            | otherwise
+            = let
+                btreeAddr = word64LEAt fileData offset
+                heapAddr = word64LEAt fileData (offset + 8)
+              in Just (fromIntegral btreeAddr, fromIntegral heapAddr)
+    |
+818 |   | fromIntegral (BL.length fileData) < fromIntegral offset + 16 = Nothing
+    |                                       ^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:833:39: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘a0’ to type ‘Integer’ in the following constraints
+        (Ord a0)
+          arising from a use of ‘<’
+          at src/Data/HDF5/Direct/Internal.hs:833:39
+        (Num a0)
+          arising from a use of ‘fromIntegral’
+          at src/Data/HDF5/Direct/Internal.hs:833:5-16
+    • In the expression:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 8
+      In a stmt of a pattern guard for
+                     an equation for ‘parseV1BTreeNode’:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 8
+      In an equation for ‘parseV1BTreeNode’:
+          parseV1BTreeNode fileData offset
+            | fromIntegral (BL.length fileData) < fromIntegral offset + 8
+            = Nothing
+            | otherwise
+            = let sig = BL.take 4 (BL.drop (fromIntegral offset) fileData)
+              in
+                if sig == BL.pack [0x54, ....] then
+                    let ...
+                    in Just (fromIntegral nodeType, fromIntegral nodeLevel, numEntries)
+                else
+                    Nothing
+    |
+833 |   | fromIntegral (BL.length fileData) < fromIntegral offset + 8 = Nothing
+    |                                       ^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:872:1: warning: [GHC-40910] [-Wunused-top-binds]
+    Defined but not used: ‘parseLocalHeapOffset’
+    |
+872 | parseLocalHeapOffset fileData offset
+    | ^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:873:39: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘a0’ to type ‘Integer’ in the following constraints
+        (Ord a0)
+          arising from a use of ‘<’
+          at src/Data/HDF5/Direct/Internal.hs:873:39
+        (Num a0)
+          arising from a use of ‘fromIntegral’
+          at src/Data/HDF5/Direct/Internal.hs:873:5-16
+    • In the expression:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 32
+      In a stmt of a pattern guard for
+                     an equation for ‘parseLocalHeapOffset’:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 32
+      In an equation for ‘parseLocalHeapOffset’:
+          parseLocalHeapOffset fileData offset
+            | fromIntegral (BL.length fileData) < fromIntegral offset + 32
+            = Nothing
+            | otherwise
+            = let sig = BL.take 4 (BL.drop (fromIntegral offset) fileData)
+              in
+                if sig == BL.pack [0x48, ....] then Just (offset + 32) else Nothing
+    |
+873 |   | fromIntegral (BL.length fileData) < fromIntegral offset + 32 = Nothing
+    |                                       ^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:882:1: warning: [GHC-40910] [-Wunused-top-binds]
+    Defined but not used: ‘extractHeapString’
+    |
+882 | extractHeapString fileData offset
+    | ^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:883:39: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘a0’ to type ‘Integer’ in the following constraints
+        (Ord a0)
+          arising from a use of ‘<=’
+          at src/Data/HDF5/Direct/Internal.hs:883:39-40
+        (Num a0)
+          arising from a use of ‘fromIntegral’
+          at src/Data/HDF5/Direct/Internal.hs:883:5-16
+    • In the expression:
+        fromIntegral (BL.length fileData) <= fromIntegral offset
+      In a stmt of a pattern guard for
+                     an equation for ‘extractHeapString’:
+        fromIntegral (BL.length fileData) <= fromIntegral offset
+      In an equation for ‘extractHeapString’:
+          extractHeapString fileData offset
+            | fromIntegral (BL.length fileData) <= fromIntegral offset
+            = Nothing
+            | otherwise
+            = let
+                chunk = BL.drop (fromIntegral offset) fileData
+                bytes = BL.takeWhile (...) chunk
+              in
+                if BL.null bytes then
+                    Nothing
+                else
+                    Just
+                      (BL.unpack bytes
+                         >>= (\ b -> if b >= 32 && b < 127 then ... else []))
+    |
+883 |   | fromIntegral (BL.length fileData) <= fromIntegral offset = Nothing
+    |                                       ^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:894:39: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘a0’ to type ‘Integer’ in the following constraints
+        (Ord a0)
+          arising from a use of ‘<’
+          at src/Data/HDF5/Direct/Internal.hs:894:39
+        (Num a0)
+          arising from a use of ‘fromIntegral’
+          at src/Data/HDF5/Direct/Internal.hs:894:5-16
+    • In the expression:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 100
+      In a stmt of a pattern guard for
+                     an equation for ‘extractHeapStrings’:
+        fromIntegral (BL.length fileData) < fromIntegral offset + 100
+      In an equation for ‘extractHeapStrings’:
+          extractHeapStrings fileData offset
+            | fromIntegral (BL.length fileData) < fromIntegral offset + 100
+            = Nothing
+            | otherwise
+            = let
+                chunk = BL.take 200 (BL.drop (fromIntegral offset) fileData)
+                candidates = extractAsciiStringsFromChunk chunk
+              in Just (filter (\ s -> length s > 0 && length s < 50) candidates)
+    |
+894 |   | fromIntegral (BL.length fileData) < fromIntegral offset + 100 = Nothing
+    |                                       ^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:912:13: warning: [GHC-40910] [-Wunused-matches]
+    Defined but not used: ‘nodeType’
+    |
+912 |       Just (nodeType, _nodeLevel, numEntries) ->
+    |             ^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:1001:47: warning: [GHC-63394] [-Wx-partial]
+    In the use of ‘head’
+    (imported from Prelude, but defined in GHC.Internal.List):
+    "This is a partial function, it throws an error on empty lists. Use pattern matching, 'Data.List.uncons' or 'Data.Maybe.listToMaybe' instead. Consider refactoring to use "Data.List.NonEmpty"."
+     |
+1001 |                     let (_msgType, msgData) = head datasetMsgs
+     |                                               ^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Internal.hs:1013:1: warning: [GHC-40910] [-Wunused-top-binds]
+    Defined but not used: ‘extractDatasetDimensions’
+     |
+1013 | extractDatasetDimensions bs =
+     | ^^^^^^^^^^^^^^^^^^^^^^^^
+
+[2 of 2] Compiling Data.HDF5.Direct.Massiv
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:76:5: warning: [GHC-38856] [-Wunused-imports]
+    The import of ‘parseSuperblockVersion’
+    from module ‘Data.HDF5.Direct.Internal’ is redundant
+   |
+76 |   , parseSuperblockVersion
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:276:3: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In an equation for ‘writeElement’:
+        writeElement LittleEndian i = ...
+    |
+276 |   writeElement LittleEndian i =
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:281:3: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In an equation for ‘writeElement’: writeElement BigEndian i = ...
+    |
+281 |   writeElement BigEndian i =
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:295:3: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In an equation for ‘writeElement’:
+        writeElement LittleEndian w = ...
+    |
+295 |   writeElement LittleEndian w =
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:299:3: warning: [GHC-53633] [-Woverlapping-patterns]
+    Pattern match is redundant
+    In an equation for ‘writeElement’: writeElement BigEndian w = ...
+    |
+299 |   writeElement BigEndian w =
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:319:6: warning: [GHC-30606] [-Wredundant-constraints]
+    Redundant constraint: VU.Unbox a
+    In the type signature for:
+         createDatasetND :: forall a.
+                            (SupportedElement a, VU.Unbox a) =>
+                            [Int] -> a -> Either MassivError (HDF5Dataset a)
+    |
+319 |   :: (SupportedElement a, VU.Unbox a)
+    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:339:6: warning: [GHC-30606] [-Wredundant-constraints]
+    Redundant constraint: VU.Unbox a
+    In the type signature for:
+         createDataset1D :: forall a.
+                            (SupportedElement a, VU.Unbox a) =>
+                            Int -> a -> Either MassivError (HDF5Dataset a)
+    |
+339 |   :: (SupportedElement a, VU.Unbox a)
+    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:347:6: warning: [GHC-30606] [-Wredundant-constraints]
+    Redundant constraint: VU.Unbox a
+    In the type signature for:
+         createDataset2D :: forall a.
+                            (SupportedElement a, VU.Unbox a) =>
+                            Int -> Int -> a -> Either MassivError (HDF5Dataset a)
+    |
+347 |   :: (SupportedElement a, VU.Unbox a)
+    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:356:6: warning: [GHC-30606] [-Wredundant-constraints]
+    Redundant constraint: VU.Unbox a
+    In the type signature for:
+         createDataset3D :: forall a.
+                            (SupportedElement a, VU.Unbox a) =>
+                            Int -> Int -> Int -> a -> Either MassivError (HDF5Dataset a)
+    |
+356 |   :: (SupportedElement a, VU.Unbox a)
+    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/src/Data/HDF5/Direct/Massiv.hs:399:6: warning: [GHC-30606] [-Wredundant-constraints]
+    Redundant constraint: VU.Unbox a
+    In the type signature for:
+         byteDataToArray1D :: forall a.
+                              (SupportedElement a, VU.Unbox a) =>
+                              Int
+                              -> ByteString
+                              -> ByteOrder
+                              -> Int
+                              -> Either MassivError (Array U Ix1 a)
+    |
+399 |   :: (SupportedElement a, VU.Unbox a)
+    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ld: warning: directory not found for option '-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib'
+Preprocessing test suite 'spec' for hdf5-direct-0.1.0.0...
+Building test suite 'spec' for hdf5-direct-0.1.0.0...
+[1 of 5] Compiling IntegrationSpec [Data.HDF5.Direct.Internal changed]
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/IntegrationSpec.hs:52:5: error: [GHC-61689]
+    Module ‘Data.HDF5.Direct.Massiv’ does not export ‘parseSuperblockMetadata’.
+   |
+52 |   , parseSuperblockMetadata
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/IntegrationSpec.hs:53:5: error: [GHC-61689]
+    Module ‘Data.HDF5.Direct.Massiv’ does not export ‘discoverAllDatasets’.
+    Suggested fix: Perhaps use ‘discoverDatasets’
+   |
+53 |   , discoverAllDatasets
+   |     ^^^^^^^^^^^^^^^^^^^
+
+[2 of 5] Compiling LibSpec [Data.HDF5.Direct.Internal changed]
+[3 of 5] Compiling MassivMultidimSpec [Data.HDF5.Direct.Massiv changed]
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/MassivMultidimSpec.hs:1:1: warning: [GHC-85401] [-Wmissing-export-lists]
+    The export item ‘module MassivMultidimSpec’ is missing an export list
+  |
+1 | {-# LANGUAGE ScopedTypeVariables #-}
+  | ^
+
+[4 of 5] Compiling QuickCheckSpec [Data.HDF5.Direct.Internal changed]
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:10:19: warning: [GHC-38856] [-Wunused-imports]
+    The import of ‘Word8’ from module ‘Data.Word’ is redundant
+   |
+10 | import Data.Word (Word8, Word16, Word32)
+   |                   ^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:11:1: warning: [GHC-66111] [-Wunused-imports]
+    The import of ‘Data.Binary.Put’ is redundant
+      except perhaps to import instances from ‘Data.Binary.Put’
+    To import instances alone, use: import Data.Binary.Put()
+   |
+11 | import Data.Binary.Put (runPut, putWord8, putWord16be, putWord32be)
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:12:1: warning: [GHC-66111] [-Wunused-imports]
+    The qualified import of ‘Data.ByteString.Lazy’ is redundant
+      except perhaps to import instances from ‘Data.ByteString.Lazy’
+    To import instances alone, use: import Data.ByteString.Lazy()
+   |
+12 | import qualified Data.ByteString.Lazy as BL
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:13:1: warning: [GHC-66111] [-Wunused-imports]
+    The import of ‘Data.Binary.Get’ is redundant
+      except perhaps to import instances from ‘Data.Binary.Get’
+    To import instances alone, use: import Data.Binary.Get()
+   |
+13 | import Data.Binary.Get (runGet)
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:14:1: warning: [GHC-66111] [-Wunused-imports]
+    The qualified import of ‘Data.Binary.Get’ is redundant
+      except perhaps to import instances from ‘Data.Binary.Get’
+    To import instances alone, use: import Data.Binary.Get()
+   |
+14 | import qualified Data.Binary.Get as Get
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:30:5: warning: [GHC-38856] [-Wunused-imports]
+    The import of ‘parseBitfield, parseFixedPoint, parseFloatingPoint,
+                   parseOpaque, parseString, parseTime’
+    from module ‘Data.HDF5.Direct.Internal’ is redundant
+   |
+30 |   , parseFixedPoint
+   |     ^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:43:1: warning: [GHC-90177] [-Worphans]
+    Orphan class instance: instance Arbitrary ByteOrder
+    Suggested fix:
+      Move the instance declaration to the module of the class or of the type, or
+      wrap the type with a newtype and declare the instance on the new type.
+   |
+43 | instance Arbitrary ByteOrder where
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:46:1: warning: [GHC-90177] [-Worphans]
+    Orphan class instance: instance Arbitrary PaddingType
+    Suggested fix:
+      Move the instance declaration to the module of the class or of the type, or
+      wrap the type with a newtype and declare the instance on the new type.
+   |
+46 | instance Arbitrary PaddingType where
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:49:1: warning: [GHC-90177] [-Worphans]
+    Orphan class instance: instance Arbitrary CharacterSet
+    Suggested fix:
+      Move the instance declaration to the module of the class or of the type, or
+      wrap the type with a newtype and declare the instance on the new type.
+   |
+49 | instance Arbitrary CharacterSet where
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+/Users/marco/Documents/code/Haskell/hdf5-direct/test/QuickCheckSpec.hs:52:1: warning: [GHC-90177] [-Worphans]
+    Orphan class instance: instance Arbitrary ReferenceType
+    Suggested fix:
+      Move the instance declaration to the module of the class or of the type, or
+      wrap the type with a newtype and declare the instance on the new type.
+   |
+52 | instance Arbitrary ReferenceType where
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+
+Error: [S-7282]
+       Stack failed to execute the build plan.
+       
+       While executing the build plan, Stack encountered the error:
+       
+       [S-7011]
+       While building package hdf5-direct-0.1.0.0 (scroll up to its section to see the error) using:
+       /Users/marco/.stack/setup-exe-cache/x86_64-osx/Cabal-simple_w2MFVN35_3.12.1.0_ghc-9.10.3 --verbose=1 --builddir=.stack-work/dist/x86_64-osx/ghc-9.10.3 build lib:hdf5-direct exe:hdf5-direct test:spec --ghc-options ""
+       Process exited with code: ExitFailure 1 
