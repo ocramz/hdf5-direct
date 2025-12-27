@@ -10,11 +10,10 @@ Direct HDF5 bindings for Haskell with lazy-loading via memory-mapped I/O and Mas
 
 A pure Haskell library for reading HDF5 files with:
 - **Memory-mapped I/O**: Zero-copy lazy loading of large datasets
-- **No C/C++**
 - **Type-safe arrays**: Integration with the Massiv library for N-dimensional arrays
 - **Structured errors**: Proper error handling without `String` error types
 - **Resource safety**: Bracket-based API guarantees proper cleanup
-- **Real-world testing**: 21 test files from the HDFGroup repository
+- **Real-world testing**: 21 test files from HDFGroup + ann-benchmarks kosarak-jaccard.hdf5 (33MB)
 
 ## Quick Start
 
@@ -25,11 +24,14 @@ make help
 # Build the library
 make build
 
-# Run all 123 tests (unit + integration)
+# Run all 149 tests (unit + integration)
 make test
 
 # Download HDF5 test files
 bash download-test-files.sh
+
+# Download real-world ann-benchmarks dataset (33MB)
+bash download-kosarak.sh
 
 # Generate documentation
 make docs
@@ -41,7 +43,7 @@ make docs
 ```bash
 make build           # Build the library
 make rebuild         # Clean and rebuild everything
-make test            # Run all tests (unit + integration)
+make test            # Run all 149 tests
 make test-unit       # Run unit tests
 make test-integration # Run integration tests
 make test-verbose    # Run tests with detailed output
@@ -88,7 +90,10 @@ make diagnose        # Run full diagnostics
 - ✅ **Massiv array integration** - Type-safe N-dimensional arrays (1D, 2D, 3D+)
 - ✅ **Structured error handling** - Proper error types instead of String
 - ✅ **Resource safety** - Bracket-based API with guaranteed cleanup
-- ✅ **Comprehensive test suite** - 123 tests across 21 real HDF5 files
+- ✅ **Comprehensive test suite** - 149 tests covering:
+  - 21 HDFGroup test files (various datatypes and structures)
+  - Real-world ann-benchmarks kosarak-jaccard.hdf5 (33MB)
+  - Large-scale data handling (10K+ element arrays)
 - ✅ **No unsafe functions** - No partial functions (head, tail, !!)
 - ✅ **Automated CI/CD** - GitHub Actions for multi-version testing
 
@@ -202,3 +207,25 @@ make check-tests     # List all available test files
 make download-tests  # Download additional test files from HDFGroup
 bash download-test-files.sh  # Manual download script
 ```
+
+## Real-World Data Testing
+
+The project includes integration tests with real-world HDF5 data from the ann-benchmarks project:
+
+**kosarak-jaccard.hdf5** (33 MB)
+- Large-scale similarity search dataset
+- Source: [ann-benchmarks.com](http://ann-benchmarks.com/)
+- Used to validate performance with production-scale files
+- Tests mmap handling of 33MB+ files
+- Exercises lazy-loading on substantial datasets
+
+```bash
+# Download the ann-benchmarks kosarak-jaccard.hdf5 file
+bash download-kosarak.sh
+```
+
+This file serves as a real-world integration test, validating that:
+- The library can handle large files (>30MB)
+- Memory-mapped I/O performs efficiently
+- Resource management works correctly with production data
+- Error handling is robust with complex HDF5 structures
