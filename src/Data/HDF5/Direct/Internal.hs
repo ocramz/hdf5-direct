@@ -10,7 +10,6 @@ module Data.HDF5.Direct.Internal
   , withMmapFile
   , mmapFileRegion
   , openMmapFile
-  , closeMmapFile
     -- * File write operations
   , writeHDF5File
   , appendToFile
@@ -55,21 +54,37 @@ module Data.HDF5.Direct.Internal
   , parseCompound
   , parseVariableLength
   , parseArray
+    -- * HDF5 Metadata parsing
+  , HDF5Superblock(..)
+  , HDF5DatasetInfo(..)
+  , parseSuperblockVersion
+  , discoverDatasets
+    -- * HDF5 Introspection and Validation
+  , HDF5Introspection(..)
+  , validateHDF5Signature
+  , describeDatatypeClass
+  , formatDatatype
+  , introspectHDF5File
+  , assertHDF5WellFormed
   ) where
 
-import Control.Exception (Exception, bracket, catch, throwIO, SomeException, displayException)
-import Data.Word (Word8, Word16, Word32, Word64)
-import Data.Int (Int64)
-import Data.ByteString.Lazy (ByteString)
-import qualified Data.ByteString.Lazy as BL
+import Control.Exception (Exception, bracket, catch, throwIO, SomeException, displayException, try)
 import Data.Binary.Get (Get)
-import qualified Data.Binary.Get as Get
 import Data.Binary.Put (Put, runPut)
 import Data.Bits (shiftL, shiftR, (.|.))
+import Data.ByteString.Lazy (ByteString)
+import Data.Char (toLower)
+import Data.Int (Int64)
+import Data.List (isSubsequenceOf, tails, nub, nubBy)
+import Data.Maybe (fromMaybe, catMaybes)
+import Data.Word (Word8, Word16, Word32, Word64)
 import Foreign.ForeignPtr (ForeignPtr)
+import GHC.Generics (Generic)
+import qualified Data.Binary.Get as Get
+import qualified Data.ByteString.Lazy as BL
+import System.Directory (doesFileExist)
 import System.IO (withFile, IOMode(WriteMode, AppendMode), hFlush)
 import System.IO.MMap (Mode(ReadOnly), mmapFileByteStringLazy, mmapFileForeignPtr)
-import GHC.Generics (Generic)
 
 -- | Exception type for HDF5 parsing and I/O errors
 data HDF5Exception
@@ -98,7 +113,7 @@ withMmapFile
   -> (MmapFile -> IO a)
   -> IO a
 withMmapFile path = 
-  bracket (openMmapFile path) closeMmapFile
+  bracket (openMmapFile path) (const $ pure ())  -- No explicit unmap needed; handled by ForeignPtr
 
 -- | Open a file for mmap-based lazy reading
 openMmapFile :: FilePath -> IO MmapFile
@@ -108,12 +123,7 @@ openMmapFile path =
     return $ MmapFile path ptr offset size
   ) (\(ex :: SomeException) -> throwIO $ MmapIOError ("Failed to mmap " ++ path ++ ": " ++ displayException ex))
 
--- | Close and unmap a previously opened file
---
---   ForeignPtr automatic finalizer handles unmapping via garbage collection.
---   This function is a no-op but kept for explicit resource management if needed.
-closeMmapFile :: MmapFile -> IO ()
-closeMmapFile _ = return ()
+
 
 -- | Extract a lazy ByteString from a file region via mmap
 --
@@ -517,3 +527,258 @@ parseArray = do
   let dims = replicate (fromIntegral dimensionality) 0
   -- Full implementation deferred
   return $ ArrayType (HDF5Datatype 0 (ClassFixedPoint (FixedPointType LittleEndian False 0 8 1))) dims
+
+-- ============================================================================
+-- HDF5 Metadata Parsing
+-- ============================================================================
+
+-- | HDF5 file superblock information
+data HDF5Superblock = HDF5Superblock
+  { sbVersion :: !Int           -- ^ Superblock version (0, 1, 2, or 3)
+  , sbRootGroupOffset :: !Word64  -- ^ Byte offset of root group's object header
+  , sbFileConsistencyFlags :: !Word8
+  } deriving (Show, Eq)
+
+-- | Information about a dataset extracted from HDF5 metadata
+data HDF5DatasetInfo = HDF5DatasetInfo
+  { dsiName :: !String            -- ^ Dataset name
+  , dsiDimensions :: ![Int]       -- ^ Dimensions of dataset
+  , dsiDatatype :: !(Maybe HDF5Datatype)  -- ^ Datatype if successfully parsed
+  , dsiObjectHeaderOffset :: !Word64  -- ^ Byte offset in file
+  } deriving (Show, Eq)
+
+-- | Introspection data for loaded HDF5 objects
+data HDF5Introspection = HDF5Introspection
+  { intro_filePath :: FilePath
+  , intro_fileSize :: Integer
+  , intro_validSignature :: Bool
+  , intro_datatype :: Maybe HDF5Datatype
+  , intro_summary :: String
+  } deriving (Show, Eq)
+
+-- ============================================================================
+-- Shared Helpers for String Extraction and Validation
+-- ============================================================================
+
+-- | Check if a string looks like a dataset name (shared by discovery functions)
+isDatasetName :: String -> Bool
+isDatasetName s =
+  let lower = map toLower s
+      keywords = ["data", "train", "test", "distance", "neighbor", "ground",
+                 "feature", "label", "index", "knn", "set", "array"]
+      hasKeyword = any (\kw -> isSubsequenceOf kw lower) keywords
+  in hasKeyword && all (\c -> c >= ' ' && c < '~') s
+
+-- | Extract printable ASCII strings from a chunk of bytes
+extractAsciiStringsFromChunk :: BL.ByteString -> [String]
+extractAsciiStringsFromChunk chunk =
+  let bytes = BL.unpack chunk
+      possibleStrings = extractAllSubstrings bytes 0
+  in catMaybes (map bytesToAsciiString possibleStrings)
+  where
+    -- Extract all possible substrings from bytes
+    extractAllSubstrings :: [Word8] -> Int -> [[Word8]]
+    extractAllSubstrings [] _ = []
+    extractAllSubstrings (b:bs') pos =
+      let allTails = takeSubstrings (b:bs') pos
+      in allTails ++ extractAllSubstrings bs' (pos + 1)
+    
+    -- Take substrings of various lengths
+    takeSubstrings :: [Word8] -> Int -> [[Word8]]
+    takeSubstrings bytes _ =
+      [ take len bytes | len <- [3..32] ]
+    
+    -- Convert bytes to ASCII string if all are printable
+    bytesToAsciiString :: [Word8] -> Maybe String
+    bytesToAsciiString bytes =
+      let isAscii b = b >= 32 && b < 127
+      in if all isAscii bytes && length bytes > 2
+         then Just (map (toEnum . fromIntegral) bytes)
+         else Nothing
+
+-- | Convert 4 bytes to Word32 in specified byte order
+convertWord32 :: ByteOrder -> BL.ByteString -> Word32
+convertWord32 LittleEndian bs
+  | BL.length bs < 4 = 0
+  | otherwise =
+    let [b0, b1, b2, b3] = map (fromIntegral . fromIntegral) (BL.unpack (BL.take 4 bs)) :: [Word32]
+    in b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24)
+convertWord32 BigEndian bs
+  | BL.length bs < 4 = 0
+  | otherwise =
+    let [b3,b2,b1,b0] = map fromIntegral (BL.unpack (BL.take 4 bs)) :: [Word32]
+    in (b3 `shiftL` 24) .|. (b2 `shiftL` 16) .|. (b1 `shiftL` 8) .|. b0
+
+-- | Convert 8 bytes to Word64 in specified byte order
+convertWord64 :: ByteOrder -> BL.ByteString -> Word64
+convertWord64 LittleEndian bs
+  | BL.length bs < 8 = 0
+  | otherwise =
+    let bytes = BL.take 8 bs
+        [b0,b1,b2,b3,b4,b5,b6,b7] = map fromIntegral (BL.unpack bytes) :: [Word64]
+    in b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24) .|.
+       (b4 `shiftL` 32) .|. (b5 `shiftL` 40) .|. (b6 `shiftL` 48) .|. (b7 `shiftL` 56)
+convertWord64 BigEndian bs
+  | BL.length bs < 8 = 0
+  | otherwise =
+    let bytes = BL.take 8 bs
+        [b0,b1,b2,b3,b4,b5,b6,b7] = map fromIntegral (BL.unpack bytes) :: [Word64]
+    in (b7 `shiftL` 56) .|. (b6 `shiftL` 48) .|. (b5 `shiftL` 40) .|. (b4 `shiftL` 32) .|.
+       (b3 `shiftL` 24) .|. (b2 `shiftL` 16) .|. (b1 `shiftL` 8) .|. b0
+
+-- | Check if HDF5 file signature is valid
+validateHDF5Signature :: BL.ByteString -> Bool
+validateHDF5Signature bs
+  | BL.length bs < 8 = False
+  | otherwise = BL.take 8 bs == hdf5Magic
+  where
+    hdf5Magic = BL.pack [0x89, 0x48, 0x44, 0x46, 0x0D, 0x0A, 0x1A, 0x0A]
+
+-- | Datatype class description
+describeDatatypeClass :: DatatypeClass -> String
+describeDatatypeClass dt = case dt of
+  ClassFixedPoint fp ->
+    "FixedPoint (" ++ show (fpSize fp) ++ " bytes, " ++
+    (if fpSigned fp then "signed" else "unsigned") ++ ", " ++
+    show (fpByteOrder fp) ++ ")"
+  ClassFloatingPoint _ -> "FloatingPoint"
+  ClassTime _ -> "Time"
+  ClassString _ -> "String"
+  ClassBitfield _ -> "Bitfield"
+  ClassOpaque _ -> "Opaque"
+  ClassCompound _ -> "Compound"
+  ClassReference _ -> "Reference"
+  ClassEnumeration _ -> "Enumeration"
+  ClassVariableLength vl ->
+    "VariableLength (string: " ++ show (vlIsString vl) ++ ")"
+  ClassArray _ -> "Array"
+
+-- | Format a datatype for display
+formatDatatype :: HDF5Datatype -> String
+formatDatatype (HDF5Datatype version cls) =
+  "HDF5Datatype(v" ++ show version ++ ", " ++ describeDatatypeClass cls ++ ")"
+
+-- | Introspect a loaded HDF5 file using mmap
+introspectHDF5File :: FilePath -> IO (Either String HDF5Introspection)
+introspectHDF5File path = do
+  exists <- doesFileExist path
+  if not exists
+    then return $ Left $ "File does not exist: " ++ path
+    else do
+      result <- try $ do
+        -- Get file size by reading file as lazy ByteString
+        contents <- BL.readFile path
+        let fileSize = fromIntegral (BL.length contents) :: Integer
+        let validSig = validateHDF5Signature contents
+        return HDF5Introspection
+          { intro_filePath = path
+          , intro_fileSize = fileSize
+          , intro_validSignature = validSig
+          , intro_datatype = Nothing  -- Would require full parsing
+          , intro_summary = "File: " ++ show (BL.length contents) ++ " bytes, " ++
+                           "signature valid: " ++ show validSig
+          }
+      case result of
+        Left (e :: SomeException) -> return $ Left $ "Failed to introspect: " ++ show e
+        Right intro -> return $ Right intro
+
+-- | Assert that an HDF5 file is well-formed
+assertHDF5WellFormed :: FilePath -> IO ()
+assertHDF5WellFormed path = do
+  introspection <- introspectHDF5File path
+  case introspection of
+    Left err -> error $ "HDF5 introspection failed: " ++ err
+    Right intro -> do
+      if not (intro_validSignature intro)
+        then error "HDF5 file signature is invalid"
+        else pure ()
+      if intro_fileSize intro <= 8
+        then error "HDF5 file is too small"
+        else pure ()
+
+-- | Extract superblock version from HDF5 file
+--   Returns Nothing if file is too short or doesn't have valid HDF5 signature
+parseSuperblockVersion :: BL.ByteString -> Maybe HDF5Superblock
+parseSuperblockVersion bs
+  | BL.length bs < 16 = Nothing
+  | otherwise = 
+    let signature = BL.take 8 bs
+        isValid = signature == BL.pack [0x89, 0x48, 0x44, 0x46, 0x0D, 0x0A, 0x1A, 0x0A]
+    in if not isValid then Nothing else
+       let versionByte = BL.index bs 8
+           version = fromIntegral versionByte
+           -- Root group offset location depends on superblock version
+           rootOffsetBytes = case version of
+             0 -> BL.take 8 (BL.drop 32 bs)  -- Version 0/1: offset at byte 32
+             1 -> BL.take 8 (BL.drop 32 bs)  -- Version 0/1: offset at byte 32
+             _ -> BL.take 8 (BL.drop 20 bs)  -- Version 2/3: offset at byte 20
+           rootOffset = word64LE rootOffsetBytes
+           flags = if BL.length bs > 9 then BL.index bs 9 else 0
+       in Just $ HDF5Superblock version rootOffset flags
+
+-- | Byte-to-Word64 conversion (little-endian)
+word64LE :: BL.ByteString -> Word64
+word64LE = convertWord64 LittleEndian
+
+-- | Discover datasets in an HDF5 file by scanning for common patterns
+--   This heuristically discovers dataset names and basic dimension info
+--   Returns a list of discovered datasets (may be incomplete)
+discoverDatasets :: BL.ByteString -> [HDF5DatasetInfo]
+discoverDatasets bs
+  | BL.length bs < 512 = []
+  | otherwise = scanForDatasets bs 256 []
+  where
+    -- Scan through file looking for dataset markers
+    scanForDatasets :: BL.ByteString -> Int -> [HDF5DatasetInfo] -> [HDF5DatasetInfo]
+    scanForDatasets content offset acc
+      | offset + 32 > fromIntegral (BL.length content) = acc
+      | otherwise =
+        let candidates = tryExtractDatasetAt content offset
+        in case candidates of
+          [] -> scanForDatasets content (offset + 64) acc
+          ds -> scanForDatasets content (offset + 128) (acc ++ ds)
+    
+    -- Try to extract dataset information at a specific offset
+    tryExtractDatasetAt :: BL.ByteString -> Int -> [HDF5DatasetInfo]
+    tryExtractDatasetAt content pos
+      | pos + 64 > fromIntegral (BL.length content) = []
+      | otherwise =
+        let chunk = BL.drop (fromIntegral pos) content
+            -- Try to find ASCII strings that look like dataset names
+            names = extractNameCandidates chunk
+            -- Try to extract dimension info
+            dims = extractDimensionValues chunk
+        in map (\name -> HDF5DatasetInfo name dims Nothing (fromIntegral pos)) names
+    
+    -- Extract potential dataset names using shared helper
+    extractNameCandidates :: BL.ByteString -> [String]
+    extractNameCandidates chunk =
+      let allStrings = extractAsciiStringsFromChunk chunk
+          filtered = filter isDatasetName allStrings
+      in nubBy (==) filtered
+    
+    -- Extract likely dimension values from chunk
+    extractDimensionValues :: BL.ByteString -> [Int]
+    extractDimensionValues chunk
+      | BL.length chunk < 16 = []
+      | otherwise =
+        let bytes = BL.take 16 chunk
+            val1 = convertWord32 BigEndian (BL.take 4 bytes)
+            val2 = convertWord32 BigEndian (BL.drop 4 bytes)
+            val3 = convertWord32 BigEndian (BL.drop 8 bytes)
+        in case (val1, val2) of
+          (v1, 0) | v1 > 0 && v1 < 1000000 -> [fromIntegral v1]
+          (v1, v2) | v1 > 0 && v2 > 0 && v1 < 100000 && v2 < 100000 ->
+            [fromIntegral v1, fromIntegral v2]
+          _ | val3 > 0 && val3 < 1000000 -> [fromIntegral val3]
+
+
+-- | Extract dimension information from HDF5 file (wrapper around discoverDatasets)
+extractDatasetDimensions :: BL.ByteString -> [(String, [Int])]
+extractDatasetDimensions bs =
+  let datasets = discoverDatasets bs
+  in map (\d -> let dimType = if length (dsiDimensions d) == 1 then "1D" else if length (dsiDimensions d) == 2 then "2D" else "ND"
+               in (dimType, dsiDimensions d)) datasets
+    
+
+

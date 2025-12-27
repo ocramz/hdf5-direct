@@ -47,6 +47,11 @@ module Data.HDF5.Direct.Massiv
     -- * Element type support
   , SupportedElement(..)
   , ElementReadError(..)
+    -- * HDF5 Metadata discovery
+  , HDF5Superblock(..)
+  , HDF5DatasetInfo(..)
+  , parseSuperblockMetadata
+  , discoverAllDatasets
     -- * Re-exported Massiv types
   , module Data.Massiv.Array
   ) where
@@ -66,6 +71,10 @@ import Data.HDF5.Direct.Internal
   , word32ToBytes
   , word64ToBytes
   , writeHDF5File
+  , HDF5Superblock(..)
+  , HDF5DatasetInfo(..)
+  , parseSuperblockVersion
+  , discoverDatasets
   )
 
 import qualified Data.Massiv.Array as M
@@ -597,3 +606,18 @@ writeArrayAsDataset3D path arr =
           Left err -> throwIO $ massivErrorToException err
           Right ds -> writeHDF5File path (dsDataLazy ds))
         (\(e :: SomeException) -> throwIO $ MmapIOError ("Failed to write 3D array: " ++ show e))
+-- ============================================================================
+-- HDF5 Metadata Discovery API
+-- ============================================================================
+
+-- | Parse superblock metadata from an HDF5 file
+parseSuperblockMetadata :: BL.ByteString -> Either String HDF5Superblock
+parseSuperblockMetadata bs =
+  case parseSuperblockVersion bs of
+    Just sb -> Right sb
+    Nothing -> Left "Failed to parse superblock - invalid HDF5 signature or file too short"
+
+-- | Discover all datasets in an HDF5 file
+--   Uses heuristic scanning to find dataset metadata
+discoverAllDatasets :: BL.ByteString -> [HDF5DatasetInfo]
+discoverAllDatasets = discoverDatasets
