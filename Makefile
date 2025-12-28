@@ -217,10 +217,11 @@ ci: clean build test ## Full CI pipeline (clean, build, test)
 check: test lint ## Run tests and lint checks
 	@echo "$(GREEN)✓ All checks passed$(NC)"
 
-# Benchmarking (future enhancement)
-bench: ## Run benchmarks (if available)
-	@echo "$(YELLOW)Benchmarking not yet implemented$(NC)"
-	@echo "See TEST_PLAN.md for benchmarking roadmap"
+# Benchmarking
+bench: ## Run benchmark suite
+	@echo "$(GREEN)Running benchmark suite...$(NC)"
+	@stack bench
+	@echo "$(GREEN)✓ Benchmarks complete$(NC)"
 
 # Development helpers
 update-deps: ## Update Stack dependencies

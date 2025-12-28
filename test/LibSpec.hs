@@ -1,8 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module LibSpec
-  ( main
-  , spec
+  ( spec
   ) where
 
 import Test.Hspec
@@ -33,9 +32,6 @@ import Data.HDF5.Direct.Internal
   , CharacterSet(..)
   )
 
-
-main :: IO ()
-main = hspec spec
 
 spec :: Spec
 spec = do
