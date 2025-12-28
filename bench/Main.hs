@@ -7,7 +7,6 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Massiv.Array as M
 import Data.Word (Word32, Word64)
 import System.Directory (doesFileExist)
-import System.FilePath ((</>))
 import Control.Exception (catch, try, SomeException)
 import Control.Monad (filterM)
 
@@ -15,12 +14,13 @@ import Data.HDF5.Direct.Internal
   ( parseSuperblockFromFile
   , discoverDatasets
   , mmapFileRegion
+  , HDF5DatasetInfo(..)
   )
 
 import Data.HDF5.Direct.Massiv
   ( withArray1DFromFile
   , withArray2DFromFile
-  , withArray3DFromFile
+  , discoverDatasetsFromFile
   )
 
 -- | Benchmark configuration
@@ -89,45 +89,69 @@ benchmarkFile filePath = do
   putStrLn ""
   
   -- Benchmark new loading combinators (single-mmap approach)
-  putStrLn "  withArray1DFromFile (Word32):"
-  result1D <- try $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
-    let M.Sz (M.Ix1 size) = M.size arr
-    return size
-  case result1D of
-    Right size -> do
-      bench 50 $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
-        let M.Sz (M.Ix1 s) = M.size arr
-        return $! s
-      putStrLn $ "    (loaded " ++ show size ++ " elements)"
-    Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
+  -- Try to load known dataset names for kosarak file
+  let knownDatasets = if "kosarak" `elem` words filePath
+                      then ["train", "test", "neighbors"]
+                      else []
   
-  putStrLn ""
+  -- Also discover all datasets for other files
+  datasets <- discoverDatasetsFromFile filePath `catch` \(e :: SomeException) -> do
+    putStrLn $ "  Failed to discover datasets: " ++ show e
+    return []
   
-  putStrLn "  withArray2DFromFile (Word32):"
-  result2D <- try $ withArray2DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
-    let M.Sz (M.Ix2 rows cols) = M.size arr
-    return (rows, cols)
-  case result2D of
-    Right (rows, cols) -> do
-      bench 50 $ withArray2DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
-        let M.Sz (M.Ix2 r c) = M.size arr
-        return $! (r, c)
-      putStrLn $ "    (loaded " ++ show rows ++ " x " ++ show cols ++ " elements)"
-    Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
+  let -- Get dataset names - prefer known ones for kosarak, otherwise discover
+      datasetNamesToTry = if null knownDatasets
+                          then map dsiName (take 3 datasets)
+                          else knownDatasets
   
-  putStrLn ""
-  
-  putStrLn "  withArray1DFromFile (Word64):"
-  result1D64 <- try $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word64) -> do
-    let M.Sz (M.Ix1 size) = M.size arr
-    return size
-  case result1D64 of
-    Right size -> do
-      bench 50 $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word64) -> do
-        let M.Sz (M.Ix1 s) = M.size arr
-        return $! s
-      putStrLn $ "    (loaded " ++ show size ++ " elements)"
-    Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
+  if null datasetNamesToTry
+    then putStrLn "  No datasets to benchmark (skipping array benchmarks)\n"
+    else do
+      putStrLn $ "  Attempting to benchmark with datasets: " ++ show datasetNamesToTry
+      putStrLn ""
+      let firstDatasetName = case datasetNamesToTry of
+            (ds:_) -> ds
+            [] -> ""  -- This won't happen due to null check above
+      
+      putStrLn $ "  withArray1DFromFile (Word32) [dataset: " ++ firstDatasetName ++ "]:"
+      result1D <- try $ withArray1DFromFile filePath firstDatasetName $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
+        let M.Sz (M.Ix1 size) = M.size arr
+        return size
+      case result1D of
+        Right size -> do
+          bench 50 $ withArray1DFromFile filePath firstDatasetName $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
+            let M.Sz (M.Ix1 s) = M.size arr
+            return $! s
+          putStrLn $ "    (loaded " ++ show size ++ " elements)"
+        Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
+      
+      putStrLn ""
+      
+      putStrLn "  withArray2DFromFile (Word32):"
+      result2D <- try $ withArray2DFromFile filePath firstDatasetName $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
+        let M.Sz (M.Ix2 rows cols) = M.size arr
+        return (rows, cols)
+      case result2D of
+        Right (rows, cols) -> do
+          bench 50 $ withArray2DFromFile filePath firstDatasetName $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
+            let M.Sz (M.Ix2 r c) = M.size arr
+            return $! (r, c)
+          putStrLn $ "    (loaded " ++ show rows ++ " x " ++ show cols ++ " elements)"
+        Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
+      
+      putStrLn ""
+      
+      putStrLn "  withArray1DFromFile (Word64):"
+      result1D64 <- try $ withArray1DFromFile filePath firstDatasetName $ \(arr :: M.Array M.U M.Ix1 Word64) -> do
+        let M.Sz (M.Ix1 size) = M.size arr
+        return size
+      case result1D64 of
+        Right size -> do
+          bench 50 $ withArray1DFromFile filePath firstDatasetName $ \(arr :: M.Array M.U M.Ix1 Word64) -> do
+            let M.Sz (M.Ix1 s) = M.size arr
+            return $! s
+          putStrLn $ "    (loaded " ++ show size ++ " elements)"
+        Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
   
   putStrLn ""
   putStrLn ""

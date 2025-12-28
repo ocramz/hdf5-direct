@@ -35,4 +35,4 @@ testReadHDF5 filepath = do
   bs <- BL.readFile filepath
   let datasets = discoverDatasets bs
   putStrLn $ "Discovered " ++ show (length datasets) ++ " datasets"
-  mapM_ (\d -> putStrLn $ "  - " ++ dsiName d) datasets
+  mapM_ (\d -> putStrLn $ "  - " ++ dsiName d ++ ": " ++ show (dsDimensions (dsiDataspace d))) datasets
