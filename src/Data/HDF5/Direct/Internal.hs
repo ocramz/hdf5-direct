@@ -13,7 +13,7 @@ module Data.HDF5.Direct.Internal
   , withMmapFile
   , mmapFileRegion
   , parseSuperblockFromFile
-  , openMmapFile
+  -- , openMmapFile
     -- * File write operations
   , writeHDF5File
   , appendToFile
@@ -61,6 +61,20 @@ module Data.HDF5.Direct.Internal
     -- * HDF5 Metadata parsing
   , HDF5Superblock(..)
   , HDF5DatasetInfo(..)
+  , HDF5Dataspace(..)
+  , DataspaceVersion(..)
+  , DataspaceType(..)
+  , HDF5DataLayout(..)
+  , LayoutVersion(..)
+  , HDF5Filter(..)
+  , FilterID(..)
+  , HDF5FilterPipeline(..)
+  , FilterPipelineVersion(..)
+  , HDF5FillValue(..)
+  , FillValueVersion(..)
+  , SpaceAllocationTime(..)
+  , FillValueWriteTime(..)
+  , ObjectHeaderMessage(..)
   , parseSuperblockVersion
   , parseSuperblockMetadata
   , discoverDatasets
@@ -78,7 +92,7 @@ import Control.Exception (Exception, bracket, catch, throwIO, SomeException, dis
 import Control.Monad (when)
 import Data.Binary.Get (Get)
 import Data.Binary.Put (Put, runPut)
-import Data.Bits (shiftL, shiftR, (.|.))
+import Data.Bits (shiftL, shiftR, (.|.), (.&.), testBit)
 import Data.ByteString.Lazy (ByteString)
 import Data.Char (toLower)
 import Data.Int (Int64)
@@ -90,7 +104,6 @@ import GHC.Generics (Generic)
 import Numeric (showHex)
 import qualified Data.Binary.Get as Get
 import qualified Data.ByteString.Lazy as BL
-import Data.Bits (testBit)
 import System.Directory (doesFileExist, getFileSize)
 import System.IO (withFile, IOMode(WriteMode, AppendMode), hFlush)
 import System.IO.MMap (Mode(ReadOnly), mmapFileByteStringLazy, mmapFileForeignPtr)
@@ -578,11 +591,141 @@ data HDF5Superblock = HDF5Superblock
   , sbFileConsistencyFlags :: !Word8
   } deriving (Show, Eq)
 
+-- ============================================================================
+-- HDF5 Object Header Message Types (v1 focus)
+-- ============================================================================
+
+-- | Dataspace message version
+data DataspaceVersion = DataspaceV1 | DataspaceV2
+  deriving (Show, Eq)
+
+-- | Dataspace type (v2 only)
+data DataspaceType
+  = ScalarDataspace    -- ^ 0: Scalar (single value)
+  | SimpleDataspace    -- ^ 1: Simple (rectangular array)
+  | NullDataspace      -- ^ 2: Null (no storage)
+  deriving (Show, Eq)
+
+-- | Dataspace description (from message type 0x0001)
+-- v1 and v2 supported
+data HDF5Dataspace = HDF5Dataspace
+  { dsVersion :: !DataspaceVersion    -- ^ Dataspace version (1 or 2)
+  , dsDimensionality :: !Word8        -- ^ Number of dimensions
+  , dsHasMaxDimensions :: !Bool       -- ^ Whether max dimensions are present
+  , dsType :: !(Maybe DataspaceType)  -- ^ Dataspace type (v2 only)
+  , dsDimensions :: ![Word64]         -- ^ Current dimension sizes
+  , dsMaxDimensions :: !(Maybe [Word64])  -- ^ Maximum dimension sizes (if present)
+  } deriving (Show, Eq)
+
+-- | Data layout message version
+data LayoutVersion = LayoutV1 | LayoutV2 | LayoutV3
+  deriving (Show, Eq)
+
+-- | Data layout storage type (from message type 0x0008)
+-- Versions 1, 2, 3 supported (v3 is most common)
+data HDF5DataLayout
+  = CompactLayout
+      { clVersion :: !LayoutVersion   -- ^ Layout version
+      , clSize :: !Word16             -- ^ Size of compact data
+      , clRawData :: !BL.ByteString   -- ^ Embedded data
+      }
+  | ContiguousLayout
+      { cnVersion :: !LayoutVersion   -- ^ Layout version  
+      , cnAddress :: !Word64          -- ^ File address of data
+      , cnSize :: !Word64             -- ^ Total size of data
+      }
+  | ChunkedLayout
+      { chVersion :: !LayoutVersion   -- ^ Layout version
+      , chDimensionality :: !Word8    -- ^ Number of chunk dimensions
+      , chBTreeAddress :: !Word64     -- ^ Address of B-tree for chunks
+      , chChunkDimensions :: ![Word32] -- ^ Size of each chunk dimension (elements)
+      , chElementSize :: !Word32      -- ^ Size of one element (bytes)
+      }
+  deriving (Show, Eq)
+
+-- | HDF5 standard filter identifiers
+data FilterID
+  = DeflateFilter      -- ^ 1: gzip/deflate compression
+  | ShuffleFilter      -- ^ 2: Byte shuffle
+  | Fletcher32Filter   -- ^ 3: Fletcher32 checksum
+  | SzipFilter         -- ^ 4: Szip compression
+  | NbitFilter         -- ^ 5: N-bit packing
+  | ScaleOffsetFilter  -- ^ 6: Scale+offset compression
+  | CustomFilter !Word16  -- ^ Custom/unknown filter ID
+  deriving (Show, Eq)
+
+-- | Filter pipeline message version
+data FilterPipelineVersion = FilterPipelineV1 | FilterPipelineV2
+  deriving (Show, Eq)
+
+-- | HDF5 Filter in pipeline (from message type 0x000B)
+-- Versions 1 and 2 supported
+data HDF5Filter = HDF5Filter
+  { fltFilterID :: !FilterID          -- ^ Filter identifier
+  , fltIsOptional :: !Bool            -- ^ Whether filter is optional (can be skipped)
+  , fltName :: !(Maybe String)        -- ^ Filter name (optional)
+  , fltClientData :: ![Word32]        -- ^ Filter-specific parameters
+  } deriving (Show, Eq)
+
+-- | Filter pipeline for compressed/filtered datasets
+data HDF5FilterPipeline = HDF5FilterPipeline
+  { fpVersion :: !FilterPipelineVersion  -- ^ Pipeline version (1 or 2)
+  , fpFilters :: ![HDF5Filter]        -- ^ Filters in application order
+  } deriving (Show, Eq)
+
+-- | Fill value message version
+data FillValueVersion = FillValueV1 | FillValueV2 | FillValueV3
+  deriving (Show, Eq)
+
+-- | Space allocation time for datasets
+data SpaceAllocationTime
+  = AllocateLate        -- ^ 0: Allocate when data is first written
+  | AllocateEarly       -- ^ 1: Allocate when dataset is created
+  | AllocateIncremental -- ^ 2: Allocate incrementally as data is written
+  deriving (Show, Eq)
+
+-- | Fill value write time
+data FillValueWriteTime
+  = WriteNever    -- ^ 0: Never write fill value
+  | WriteOnAlloc  -- ^ 1: Write fill value when space is allocated
+  | WriteIfSet    -- ^ 2: Write fill value if explicitly set by user
+  deriving (Show, Eq)
+
+-- | Fill value information (from message types 0x0004 old, 0x0005 new)
+-- Versions 1, 2, 3 supported
+data HDF5FillValue
+  = FillValueUndefined                -- ^ No fill value defined
+  | FillValueDefault                  -- ^ Use datatype's default (usually 0)
+  | FillValueDefined
+      { fvVersion :: !FillValueVersion        -- ^ Fill value version
+      , fvSpaceAllocTime :: !SpaceAllocationTime  -- ^ When to allocate space
+      , fvFillWriteTime :: !FillValueWriteTime    -- ^ When to write fill value
+      , fvSize :: !Word32             -- ^ Size of fill value
+      , fvData :: !BL.ByteString      -- ^ Fill value data
+      }
+  deriving (Show, Eq)
+
+-- | Object header message (v1 format)
+-- Parsed message types with structured data
+data ObjectHeaderMessage
+  = NilMessage                        -- ^ Type 0x0000: placeholder/padding
+  | DataspaceMessage !HDF5Dataspace   -- ^ Type 0x0001: dataspace description
+  | DatatypeMessage !HDF5Datatype     -- ^ Type 0x0003: datatype description
+  | FillValueMessage !HDF5FillValue   -- ^ Type 0x0004 (old) or 0x0005 (new): fill value
+  | DataLayoutMessage !HDF5DataLayout -- ^ Type 0x0008: data storage layout
+  | FilterPipelineMessage !HDF5FilterPipeline  -- ^ Type 0x000B: filter pipeline
+  | SymbolTableMessage !Word64 !Word64  -- ^ Type 0x0011: B-tree address, heap address
+  | UnknownMessage !Word16 !BL.ByteString  -- ^ Unknown type: type ID, raw data
+  deriving (Show, Eq)
+
 -- | Information about a dataset extracted from HDF5 metadata
 data HDF5DatasetInfo = HDF5DatasetInfo
-  { dsiName :: !String            -- ^ Dataset name
-  , dsiDimensions :: ![Int]       -- ^ Dimensions of dataset
-  , dsiDatatype :: !(Maybe HDF5Datatype)  -- ^ Datatype if successfully parsed
+  { dsiName :: !String                -- ^ Dataset name
+  , dsiDataspace :: !HDF5Dataspace    -- ^ Dataspace (dimensions, max dims)
+  , dsiDatatype :: !HDF5Datatype      -- ^ Datatype (required, not optional)
+  , dsiLayout :: !HDF5DataLayout      -- ^ Data layout (storage type and location)
+  , dsiFilters :: !(Maybe HDF5FilterPipeline)  -- ^ Optional filter pipeline
+  , dsiFillValue :: !(Maybe HDF5FillValue)     -- ^ Optional fill value
   , dsiObjectHeaderOffset :: !Word64  -- ^ Byte offset in file
   } deriving (Show, Eq)
 
@@ -974,7 +1117,306 @@ parseSuperblockV2V3 bs ver = do
             
             pure (rootAddr, offsetSz, lenSz)
 
--- | Parse Object Header v1 messages
+-- ============================================================================
+-- Object Header Message Parsers (v1 focus)
+-- ============================================================================
+
+-- | Convert Word8 to DataspaceVersion
+parseDataspaceVersion :: Word8 -> Either HDF5ParseError DataspaceVersion
+parseDataspaceVersion 1 = Right DataspaceV1
+parseDataspaceVersion 2 = Right DataspaceV2
+parseDataspaceVersion v = Left $ InvalidVersion $ "Unsupported dataspace version: " ++ show v
+
+-- | Convert Word8 to DataspaceType (v2 only)
+parseDataspaceType :: Word8 -> Either HDF5ParseError DataspaceType
+parseDataspaceType 0 = Right ScalarDataspace
+parseDataspaceType 1 = Right SimpleDataspace
+parseDataspaceType 2 = Right NullDataspace
+parseDataspaceType v = Left $ InvalidVersion $ "Invalid dataspace type: " ++ show v
+
+-- | Convert Word8 to LayoutVersion
+parseLayoutVersion :: Word8 -> Either HDF5ParseError LayoutVersion
+parseLayoutVersion 1 = Right LayoutV1
+parseLayoutVersion 2 = Right LayoutV2
+parseLayoutVersion 3 = Right LayoutV3
+parseLayoutVersion v = Left $ InvalidVersion $ "Unsupported layout version: " ++ show v
+
+-- | Convert Word16 to FilterID
+parseFilterID :: Word16 -> FilterID
+parseFilterID 1 = DeflateFilter
+parseFilterID 2 = ShuffleFilter
+parseFilterID 3 = Fletcher32Filter
+parseFilterID 4 = SzipFilter
+parseFilterID 5 = NbitFilter
+parseFilterID 6 = ScaleOffsetFilter
+parseFilterID n = CustomFilter n
+
+-- | Convert Word8 to FilterPipelineVersion
+parseFilterPipelineVersion :: Word8 -> Either HDF5ParseError FilterPipelineVersion
+parseFilterPipelineVersion 1 = Right FilterPipelineV1
+parseFilterPipelineVersion 2 = Right FilterPipelineV2
+parseFilterPipelineVersion v = Left $ InvalidVersion $ "Unsupported filter pipeline version: " ++ show v
+
+-- | Convert Word8 to FillValueVersion
+parseFillValueVersion :: Word8 -> Either HDF5ParseError FillValueVersion
+parseFillValueVersion 1 = Right FillValueV1
+parseFillValueVersion 2 = Right FillValueV2
+parseFillValueVersion 3 = Right FillValueV3
+parseFillValueVersion v = Left $ InvalidVersion $ "Unsupported fill value version: " ++ show v
+
+-- | Convert Word8 to SpaceAllocationTime
+parseSpaceAllocationTime :: Word8 -> Either HDF5ParseError SpaceAllocationTime
+parseSpaceAllocationTime 0 = Right AllocateLate
+parseSpaceAllocationTime 1 = Right AllocateEarly
+parseSpaceAllocationTime 2 = Right AllocateIncremental
+parseSpaceAllocationTime v = Left $ CorruptedMetadata $ "Invalid space allocation time: " ++ show v
+
+-- | Convert Word8 to FillValueWriteTime
+parseFillValueWriteTime :: Word8 -> Either HDF5ParseError FillValueWriteTime
+parseFillValueWriteTime 0 = Right WriteNever
+parseFillValueWriteTime 1 = Right WriteOnAlloc
+parseFillValueWriteTime 2 = Right WriteIfSet
+parseFillValueWriteTime v = Left $ CorruptedMetadata $ "Invalid fill value write time: " ++ show v
+
+-- | Parse v1/v2 Dataspace Message (Type 0x0001)
+--   Spec section IV.A.2.b
+--   Format:
+--   - Byte 0: Version (1 or 2)
+--   - Byte 1: Dimensionality (number of dimensions)
+--   - Byte 2: Flags (bit 0: max dims present, bit 1: permutation present - v1 only)
+--   - Byte 3: Reserved (v1) or Dataspace Type (v2: 0=scalar, 1=simple, 2=null)
+--   - Bytes 4-7: Reserved
+--   - Bytes 8+: Dimension sizes (lengthSize bytes each)
+--   - [Optional] Max dimension sizes (lengthSize bytes each, if flag bit 0 set)
+parseDataspaceMessage :: Int -> BL.ByteString -> Either HDF5ParseError HDF5Dataspace
+parseDataspaceMessage lengthSize msgData
+  | BL.length msgData < 8 = Left $ TruncatedData "Dataspace message too short"
+  | otherwise = do
+      versionByte <- byteAt msgData 0
+      version <- parseDataspaceVersion versionByte
+      
+      dimensionality <- byteAt msgData 1
+      flags <- byteAt msgData 2
+      typeByte <- byteAt msgData 3
+      
+      let hasMaxDims = testBit flags 0
+          numDims = fromIntegral dimensionality :: Int
+          dimsStart = 8
+          dimSize = lengthSize
+      
+      -- Parse dataspace type (v2 only)
+      dsType <- case version of
+        DataspaceV2 -> Just <$> parseDataspaceType typeByte
+        DataspaceV1 -> pure Nothing
+      
+      -- Parse current dimensions
+      dims <- parseDimensions numDims dimsStart dimSize
+      
+      -- Parse max dimensions if present
+      maxDims <- if hasMaxDims
+                 then do
+                   let maxDimsStart = dimsStart + numDims * dimSize
+                   maxDs <- parseDimensions numDims maxDimsStart dimSize
+                   pure (Just maxDs)
+                 else pure Nothing
+      
+      pure $ HDF5Dataspace version dimensionality hasMaxDims dsType dims maxDims
+  where
+    parseDimensions :: Int -> Int -> Int -> Either HDF5ParseError [Word64]
+    parseDimensions 0 _ _ = Right []
+    parseDimensions n offset sz
+      | fromIntegral (BL.length msgData) < fromIntegral (offset + sz) =
+          Left $ TruncatedData $ "Not enough bytes for dimension at offset " ++ show offset
+      | otherwise = do
+          dim <- case sz of
+            4 -> word32LEAt msgData (fromIntegral offset) >>= \w -> pure (fromIntegral w :: Word64)
+            8 -> word64LEAt msgData (fromIntegral offset)
+            _ -> Left $ CorruptedMetadata $ "Invalid length size: " ++ show sz
+          rest <- parseDimensions (n - 1) (offset + sz) sz
+          pure (dim : rest)
+
+-- | Parse v1/v3 Data Layout Message (Type 0x0008)
+--   Spec section IV.A.2.i
+--   Versions 1, 2, 3 supported (v3 is most common)
+--   Format:
+--   - Byte 0: Version (1, 2, or 3)
+--   - Byte 1: Layout class (0=compact, 1=contiguous, 2=chunked)
+--   - Bytes 2+: Layout-specific data
+parseDataLayoutMessage :: Int -> BL.ByteString -> Either HDF5ParseError HDF5DataLayout
+parseDataLayoutMessage offsetSize msgData
+  | BL.length msgData < 2 = Left $ TruncatedData "Data layout message too short"
+  | otherwise = do
+      versionByte <- byteAt msgData 0
+      version <- parseLayoutVersion versionByte
+      layoutClass <- byteAt msgData 1
+      
+      case layoutClass of
+        0 -> parseCompactLayout version msgData
+        1 -> parseContiguousLayout version offsetSize msgData
+        2 -> parseChunkedLayout version offsetSize msgData
+        _ -> Left $ CorruptedMetadata $ "Invalid layout class: " ++ show layoutClass
+  where
+    parseCompactLayout ver msgData' = do
+      -- Version 3: bytes 2-3 are size
+      size <- word16LEAt msgData' 2
+      let dataStart = 4
+          rawData = BL.drop (fromIntegral dataStart) msgData'
+      pure $ CompactLayout ver size rawData
+    
+    parseContiguousLayout ver offSz msgData' = do
+      -- Version 3: address at byte 2, size follows
+      addr <- case offSz of
+        4 -> word32LEAt msgData' 2 >>= \w -> pure (fromIntegral w :: Word64)
+        8 -> word64LEAt msgData' 2
+        _ -> Left $ CorruptedMetadata $ "Invalid offset size"
+      
+      let sizeOffset = 2 + offSz
+      size <- case offSz of  -- Size uses lengthSize, but we approximate with offsetSize
+        4 -> word32LEAt msgData' (fromIntegral sizeOffset) >>= \w -> pure (fromIntegral w :: Word64)
+        8 -> word64LEAt msgData' (fromIntegral sizeOffset)
+        _ -> Left $ CorruptedMetadata $ "Invalid offset size"
+      
+      pure $ ContiguousLayout ver addr size
+    
+    parseChunkedLayout ver offSz msgData' = do
+      -- Version 3: byte 2 is dimensionality, then address, then chunk dims
+      dimensionality <- byteAt msgData' 2
+      
+      addr <- case offSz of
+        4 -> word32LEAt msgData' 3 >>= \w -> pure (fromIntegral w :: Word64)
+        8 -> word64LEAt msgData' 3
+        _ -> Left $ CorruptedMetadata $ "Invalid offset size"
+      
+      let chunkDimsStart = 3 + offSz
+          numDims = fromIntegral dimensionality :: Int
+      
+      chunkDims <- parseChunkDims numDims chunkDimsStart msgData'
+      
+      -- Element size at end (4 bytes)
+      let elemSizeOffset = chunkDimsStart + numDims * 4
+      elemSize <- if fromIntegral (BL.length msgData') >= elemSizeOffset + 4
+                  then word32LEAt msgData' (fromIntegral elemSizeOffset)
+                  else pure 0  -- Default if not present
+      
+      pure $ ChunkedLayout ver dimensionality addr chunkDims elemSize
+    
+    parseChunkDims :: Int -> Int -> BL.ByteString -> Either HDF5ParseError [Word32]
+    parseChunkDims 0 _ _ = Right []
+    parseChunkDims n offset msgData'
+      | fromIntegral (BL.length msgData') < fromIntegral (offset + 4) =
+          Left $ TruncatedData $ "Not enough bytes for chunk dimension at offset " ++ show offset
+      | otherwise = do
+          dim <- word32LEAt msgData' (fromIntegral offset)
+          rest <- parseChunkDims (n - 1) (offset + 4) msgData'
+          pure (dim : rest)
+
+-- | Parse v1/v2 Filter Pipeline Message (Type 0x000B)
+--   Spec section IV.A.2.l
+--   Format (version 2):
+--   - Byte 0: Version (1 or 2)
+--   - Byte 1: Number of filters
+--   - Bytes 2-3: Reserved (v2) or padding (v1)
+--   - Then for each filter:
+--     * 2 bytes: Filter ID
+--     * 2 bytes (optional): Name length (if ID >= 256)
+--     * 2 bytes: Flags
+--     * 2 bytes: Number of client data values
+--     * Variable: Name (if name length > 0)
+--     * Variable: Client data (4 bytes per value)
+parseFilterPipelineMessage :: BL.ByteString -> Either HDF5ParseError HDF5FilterPipeline
+parseFilterPipelineMessage msgData
+  | BL.length msgData < 4 = Left $ TruncatedData "Filter pipeline message too short"
+  | otherwise = do
+      versionByte <- byteAt msgData 0
+      version <- parseFilterPipelineVersion versionByte
+      numFilters <- byteAt msgData 1
+      
+      filters <- parseFilters (fromIntegral numFilters) 4 []
+      
+      pure $ HDF5FilterPipeline version filters
+  where
+    parseFilters :: Int -> Int -> [HDF5Filter] -> Either HDF5ParseError [HDF5Filter]
+    parseFilters 0 _ acc = Right (reverse acc)
+    parseFilters n offset acc
+      | fromIntegral (BL.length msgData) < fromIntegral (offset + 6) =
+          Left $ TruncatedData $ "Not enough bytes for filter at offset " ++ show offset
+      | otherwise = do
+          filterIDWord <- word16LEAt msgData (fromIntegral offset)
+          let filterID = parseFilterID filterIDWord
+          
+          -- Name length present if filter ID >= 256 (optional in spec, we skip for simplicity)
+          let nameLen = 0 :: Word16
+              flagsOffset = offset + 2
+          
+          flags <- word16LEAt msgData (fromIntegral flagsOffset)
+          let isOptional = testBit flags 0
+          
+          numClientVals <- word16LEAt msgData (fromIntegral $ flagsOffset + 2)
+          
+          let clientDataOffset = flagsOffset + 4 + fromIntegral nameLen
+              clientDataSize = fromIntegral numClientVals * 4
+          
+          clientData <- parseClientData (fromIntegral numClientVals) clientDataOffset []
+          
+          let nextOffset = clientDataOffset + clientDataSize
+              flt = HDF5Filter filterID isOptional Nothing clientData
+          
+          parseFilters (n - 1) nextOffset (flt : acc)
+    
+    parseClientData :: Int -> Int -> [Word32] -> Either HDF5ParseError [Word32]
+    parseClientData 0 _ acc = Right (reverse acc)
+    parseClientData n offset acc
+      | fromIntegral (BL.length msgData) < fromIntegral (offset + 4) =
+          Left $ TruncatedData $ "Not enough bytes for client data at offset " ++ show offset
+      | otherwise = do
+          val <- word32LEAt msgData (fromIntegral offset)
+          parseClientData (n - 1) (offset + 4) (val : acc)
+
+-- | Parse v1/v3 Fill Value Message (Type 0x0005 new, 0x0004 old)
+--   Spec section IV.A.2.f
+--   Format (version 3):
+--   - Byte 0: Version (1, 2, or 3)
+--   - Byte 1: Flags
+--     * Bits 0-1: Space allocation time (0=late, 1=early, 2=incremental)
+--     * Bits 2-3: Fill value write time (0=never, 1=on_alloc, 2=if_set)
+--     * Bit 4: Fill value defined
+--     * Bit 5: Fill value undefined
+--   - Bytes 2-3: Reserved
+--   - [Optional] Bytes 4-7: Size (if fill value defined)
+--   - [Optional] Bytes 8+: Fill value data
+parseFillValueMessage :: BL.ByteString -> Either HDF5ParseError HDF5FillValue
+parseFillValueMessage msgData
+  | BL.length msgData < 4 = Left $ TruncatedData "Fill value message too short"
+  | otherwise = do
+      versionByte <- byteAt msgData 0
+      version <- parseFillValueVersion versionByte
+      flags <- byteAt msgData 1
+      
+      let allocTimeBits = flags .&. 0x03
+          writeTimeBits = (flags `shiftR` 2) .&. 0x03
+          isDefined = testBit flags 4
+          isUndefined = testBit flags 5
+      
+      if isUndefined
+        then pure FillValueUndefined
+        else if not isDefined
+          then pure FillValueDefault
+          else do
+            -- Fill value is defined, parse allocation and write times
+            allocTime <- parseSpaceAllocationTime allocTimeBits
+            writeTime <- parseFillValueWriteTime writeTimeBits
+            
+            -- Parse size and data
+            size <- if BL.length msgData >= 8
+                    then word32LEAt msgData 4
+                    else pure 0
+            
+            let dataStart = 8
+                fillData = BL.take (fromIntegral size) (BL.drop dataStart msgData)
+            
+            pure $ FillValueDefined version allocTime writeTime size fillData
+
+-- | Parse Object Header v1 messages into structured types
 --   Version 1 Object Header format:
 --   - Byte 0: Version (1)
 --   - Byte 1: Reserved
@@ -992,36 +1434,109 @@ parseSuperblockV2V3 bs ver = do
 --   - Bytes 8+: Message data
 --   - Padding to 8-byte boundary
 --
---   Returns: List of (message type, message data ByteString)
---   FUTURE: Full implementation would parse Dataspace, Datatype, Layout messages
-parseObjectHeaderMessages :: BL.ByteString -> Maybe [(Word16, BL.ByteString)]
-parseObjectHeaderMessages bs
-  | BL.length bs < 16 = Nothing
-  | otherwise =
-    let _version = byteAt bs 0  -- Error ignored for backward compat
-        -- Skip to first message at byte 16 for version 1 headers
-        go :: Int64 -> [(Word16, BL.ByteString)] -> Maybe [(Word16, BL.ByteString)]
-        go offset msgs
-          | offset >= min 4096 (fromIntegral (BL.length bs)) = Just (reverse msgs)
-          | fromIntegral (BL.length bs) < offset + 8 = Just (reverse msgs)
-          | otherwise =
-            case word16LEAt bs offset of
-              Left _ -> Just (reverse msgs)  -- Stop on error
-              Right msgType ->
-                case word16LEAt bs (offset + 2) of
-                  Left _ -> Just (reverse msgs)  -- Stop on error
-                  Right msgSz16 ->
-                    let msgSz = fromIntegral msgSz16 :: Int64
-                        -- Message data starts at offset + 8 (skip 8-byte header)
-                        msgData = BL.take (fromIntegral msgSz) (BL.drop (fromIntegral offset + 8) bs)
-                        -- Padding: round up to 8-byte boundary
-                        totalMsgBytes = 8 + msgSz  -- header + data
-                        pad = ((8 - (totalMsgBytes `mod` 8)) `mod` 8) :: Int64
-                        nextOff = offset + totalMsgBytes + pad
-                    in if msgType == 0xFFFF
-                       then Just (reverse msgs)
-                       else go nextOff ((msgType, msgData) : msgs)
-    in go 16 []
+--   Returns: List of parsed ObjectHeaderMessage types
+parseObjectHeaderMessages :: Int -> Int -> BL.ByteString -> Either HDF5ParseError [ObjectHeaderMessage]
+parseObjectHeaderMessages lengthSize offsetSize bs
+  | BL.length bs < 16 = Left $ TruncatedData "Object header too short"
+  | otherwise = do
+      _version <- byteAt bs 0  -- Should be 1 for v1 headers
+      -- Skip to first message at byte 16 for version 1 headers
+      go 16 []
+  where
+    go :: Int64 -> [ObjectHeaderMessage] -> Either HDF5ParseError [ObjectHeaderMessage]
+    go offset msgs
+      | offset >= min 4096 (fromIntegral (BL.length bs)) = Right (reverse msgs)
+      | fromIntegral (BL.length bs) < offset + 8 = Right (reverse msgs)
+      | otherwise = do
+          msgType <- word16LEAt bs offset
+          msgSz16 <- word16LEAt bs (offset + 2)
+          
+          let msgSz = fromIntegral msgSz16 :: Int64
+              -- Message data starts at offset + 8 (skip 8-byte header)
+              msgData = BL.take (fromIntegral msgSz) (BL.drop (fromIntegral offset + 8) bs)
+              -- Padding: round up to 8-byte boundary
+              totalMsgBytes = 8 + msgSz  -- header + data
+              pad = ((8 - (totalMsgBytes `mod` 8)) `mod` 8) :: Int64
+              nextOff = offset + totalMsgBytes + pad
+          
+          if msgType == 0xFFFF
+            then Right (reverse msgs)
+            else do
+              -- Parse message based on type
+              msg <- parseMessage msgType msgData
+              go nextOff (msg : msgs)
+    
+    parseMessage :: Word16 -> BL.ByteString -> Either HDF5ParseError ObjectHeaderMessage
+    parseMessage 0x0000 _ = Right NilMessage
+    parseMessage 0x0001 msgData = DataspaceMessage <$> parseDataspaceMessage lengthSize msgData
+    parseMessage 0x0003 msgData = DatatypeMessage <$> parseDatatypeMessageV1 msgData
+    parseMessage 0x0004 msgData = FillValueMessage <$> parseFillValueMessage msgData
+    parseMessage 0x0005 msgData = FillValueMessage <$> parseFillValueMessage msgData
+    parseMessage 0x0008 msgData = DataLayoutMessage <$> parseDataLayoutMessage offsetSize msgData
+    parseMessage 0x000B msgData = FilterPipelineMessage <$> parseFilterPipelineMessage msgData
+    parseMessage 0x0011 msgData = do
+      -- Symbol table message: 2 Word64 addresses
+      btreeAddr <- word64LEAt msgData 0
+      heapAddr <- word64LEAt msgData 8
+      Right $ SymbolTableMessage btreeAddr heapAddr
+    parseMessage msgType msgData = Right $ UnknownMessage msgType msgData
+
+-- | Parse v1 Datatype Message completely (Type 0x0003)
+--   This is a placeholder - we'll keep using the existing parseFixedPoint etc for now
+--   but wrap the result properly
+parseDatatypeMessageV1 :: BL.ByteString -> Either HDF5ParseError HDF5Datatype
+parseDatatypeMessageV1 msgData
+  | BL.length msgData < 8 = Left $ TruncatedData "Datatype message too short"
+  | otherwise = do
+      let classAndVersion = byteAt msgData 0
+      case classAndVersion of
+        Right cv -> do
+          let datatypeClass = cv .&. 0x0F
+              version = (cv `shiftR` 4) .&. 0x0F
+          
+          -- Get the size (bytes 4-7, little-endian Word32)
+          size <- word32LEAt msgData 4
+          
+          -- Run the appropriate Get parser on the rest of the message data
+          -- The class bits and size are at the beginning, so we need to extract
+          -- just the part starting from offset 8
+          let dataBytes = BL.drop 4 msgData  -- Skip first 4 bytes to position at class bits
+          
+          -- Use existing parsers wrapped in Either
+          case datatypeClass of
+            0 -> case Get.runGetOrFail (parseFixedPoint (fromIntegral size)) dataBytes of
+                  Right (_, _, fp) -> Right $ HDF5Datatype (fromIntegral version) (ClassFixedPoint fp)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse fixed-point: " ++ err
+            1 -> case Get.runGetOrFail (parseFloatingPoint (fromIntegral size)) dataBytes of
+                  Right (_, _, flt) -> Right $ HDF5Datatype (fromIntegral version) (ClassFloatingPoint flt)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse floating-point: " ++ err
+            2 -> case Get.runGetOrFail (parseTime (fromIntegral size)) dataBytes of
+                  Right (_, _, tm) -> Right $ HDF5Datatype (fromIntegral version) (ClassTime tm)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse time: " ++ err
+            3 -> case Get.runGetOrFail (parseString (fromIntegral size)) dataBytes of
+                  Right (_, _, str) -> Right $ HDF5Datatype (fromIntegral version) (ClassString str)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse string: " ++ err
+            4 -> case Get.runGetOrFail (parseBitfield (fromIntegral size)) dataBytes of
+                  Right (_, _, bf) -> Right $ HDF5Datatype (fromIntegral version) (ClassBitfield bf)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse bitfield: " ++ err
+            5 -> case Get.runGetOrFail (parseOpaque (fromIntegral size)) dataBytes of
+                  Right (_, _, op) -> Right $ HDF5Datatype (fromIntegral version) (ClassOpaque op)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse opaque: " ++ err
+            6 -> case Get.runGetOrFail (parseCompound (fromIntegral size)) dataBytes of
+                  Right (_, _, cmp) -> Right $ HDF5Datatype (fromIntegral version) (ClassCompound cmp)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse compound: " ++ err
+            7 -> Left $ DatatypeParseFailed "Reference datatype parsing not yet implemented"
+            8 -> case Get.runGetOrFail (parseEnumeration (fromIntegral size)) dataBytes of
+                  Right (_, _, enm) -> Right $ HDF5Datatype (fromIntegral version) (ClassEnumeration enm)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse enumeration: " ++ err
+            9 -> case Get.runGetOrFail parseVariableLength dataBytes of
+                  Right (_, _, vl) -> Right $ HDF5Datatype (fromIntegral version) (ClassVariableLength vl)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse variable-length: " ++ err
+            10 -> case Get.runGetOrFail parseArray dataBytes of
+                  Right (_, _, arr) -> Right $ HDF5Datatype (fromIntegral version) (ClassArray arr)
+                  Left (_, _, err) -> Left $ DatatypeParseFailed $ "Failed to parse array: " ++ err
+            _ -> Left $ DatatypeParseFailed $ "Unknown datatype class: " ++ show datatypeClass
+        Left err -> Left err
 
 -- | Extract symbol table message data and parse it
 --   Symbol table message (type 0x0011) format:
@@ -1242,7 +1757,8 @@ extractHeapStrings fileData offset
 -- | Extract all dataset names from a symbol table by scanning B-tree
 --   Implements full B-tree traversal to find all leaf nodes
 --   Uses recursive traversal to handle internal B-tree nodes
-parseSymbolTableForDatasets :: BL.ByteString -> Word64 -> Word64 -> [HDF5DatasetInfo]
+--   Returns dataset names only - full metadata parsing deferred
+parseSymbolTableForDatasets :: BL.ByteString -> Word64 -> Word64 -> [String]
 parseSymbolTableForDatasets fileData btreeAddr heapAddr
   | BL.length fileData < 512 = []
   | otherwise =
@@ -1259,8 +1775,35 @@ parseSymbolTableForDatasets fileData btreeAddr heapAddr
               Nothing -> []
             -- Combine all discovered names and deduplicate
             allNames = nub (names ++ heapStrings)
-            results = map (\n -> HDF5DatasetInfo n [] Nothing 0) allNames
-        in results
+        in allNames
+
+-- | Assemble HDF5DatasetInfo from parsed object header messages
+--   Validates that required messages are present
+assembleDatasetInfo :: String -> Word64 -> [ObjectHeaderMessage] -> Either HDF5ParseError HDF5DatasetInfo
+assembleDatasetInfo name offset messages = do
+  -- Extract required messages
+  dataspace <- case [ds | DataspaceMessage ds <- messages] of
+    (ds:_) -> Right ds
+    [] -> Left $ CorruptedMetadata $ "Dataset '" ++ name ++ "' missing required Dataspace message"
+  
+  datatype <- case [dt | DatatypeMessage dt <- messages] of
+    (dt:_) -> Right dt
+    [] -> Left $ CorruptedMetadata $ "Dataset '" ++ name ++ "' missing required Datatype message"
+  
+  layout <- case [ly | DataLayoutMessage ly <- messages] of
+    (ly:_) -> Right ly
+    [] -> Left $ CorruptedMetadata $ "Dataset '" ++ name ++ "' missing required DataLayout message"
+  
+  -- Extract optional messages
+  let filters = case [fp | FilterPipelineMessage fp <- messages] of
+        (fp:_) -> Just fp
+        [] -> Nothing
+  
+  let fillValue = case [fv | FillValueMessage fv <- messages] of
+        (fv:_) -> Just fv
+        [] -> Nothing
+  
+  pure $ HDF5DatasetInfo name dataspace datatype layout filters fillValue offset
 
 -- | Fallback: Extract dataset-like names using heuristics
 --   Used when full B-tree parsing is deferred
@@ -1407,6 +1950,9 @@ discoverDatasetsFromFile path = do
 --
 --   Current scope: Root group datasets only (no recursion)
 --   Handles: Superblock versions 0, 1, 2, 3
+--   
+--   NOTE: This is a simplified implementation that only returns dataset names.
+--   Full metadata extraction requires parsing each dataset's object header.
 discoverDatasets :: BL.ByteString -> [HDF5DatasetInfo]
 discoverDatasets bs
   | BL.length bs < 512 = []
@@ -1422,40 +1968,57 @@ discoverDatasets bs
               Left _ -> []
               Right (_rootObjAddr, btreeAddr, heapAddr) ->
                 -- Parse the symbol table using B-tree and heap directly
-                parseSymbolTableForDatasets bs btreeAddr heapAddr
+                -- This returns names only - we create placeholder dataset info
+                let names = parseSymbolTableForDatasets bs btreeAddr heapAddr
+                in map createPlaceholderDatasetInfo names
           else
             -- Standard addressing: parse object header for symbol table message
             let objHeaderOffset = fromIntegral rootAddr :: Int64
             in if rootAddr < 0 || fromIntegral objHeaderOffset >= BL.length bs
                then []
-               else case parseObjectHeaderMessages (BL.drop (fromIntegral objHeaderOffset) bs) of
-                 Nothing -> []
-                 Just msgs ->
-                   -- Extract dataset names from symbol table (type 0x0011)
-                   let datasetMsgs = filter (\(t, _) -> t == 0x0011) msgs
-                   in if null datasetMsgs
-                      then []
-                      else
-                        -- For symbol table messages, the data contains the B-tree and heap addresses
-                        -- Extract B-tree and heap addresses from message data
-                        let (_msgType, msgData) = head datasetMsgs
-                        in if BL.length msgData < 16
-                           then []
-                           else
-                             case (word64LEAt msgData 0, word64LEAt msgData 8) of
-                               (Left _, _) -> []
-                               (_, Left _) -> []
-                               (Right btreeAddr, Right heapAddr) ->
-                                 -- Parse the symbol table using B-tree and heap
-                                 parseSymbolTableForDatasets bs btreeAddr heapAddr
+               else case parseObjectHeaderMessages offsetSz lenSz (BL.drop (fromIntegral objHeaderOffset) bs) of
+                 Left _ -> []
+                 Right msgs ->
+                   -- Extract symbol table message (type 0x0011)
+                   case [m | m@(SymbolTableMessage _ _) <- msgs] of
+                     [] -> []
+                     (SymbolTableMessage btreeAddr heapAddr : _) ->
+                       -- Parse the symbol table using B-tree and heap
+                       -- This returns names only - we create placeholder dataset info
+                       let names = parseSymbolTableForDatasets bs btreeAddr heapAddr
+                       in map createPlaceholderDatasetInfo names
+                     _ -> []
+  where
+    -- Create placeholder HDF5DatasetInfo when full metadata is not available
+    -- This maintains backward compatibility while we transition to full metadata parsing
+    createPlaceholderDatasetInfo :: String -> HDF5DatasetInfo
+    createPlaceholderDatasetInfo name =
+      let placeholderDataspace = HDF5Dataspace DataspaceV1 1 False Nothing [0] Nothing
+          placeholderDatatype = HDF5Datatype 
+            { dtVersion = 1
+            , dtClass = ClassFixedPoint $ FixedPointType 
+                { fpByteOrder = LittleEndian
+                , fpSigned = False
+                , fpBitOffset = 0
+                , fpBitPrecision = 32
+                , fpSize = 4
+                }
+            }
+          placeholderLayout = ContiguousLayout LayoutV1 0 0
+      in HDF5DatasetInfo name placeholderDataspace placeholderDatatype placeholderLayout Nothing Nothing 0
 
 
 -- | Extract dimension information from HDF5 file (wrapper around discoverDatasets)
 extractDatasetDimensions :: BL.ByteString -> [(String, [Int])]
 extractDatasetDimensions bs =
   let datasets = discoverDatasets bs
-  in map (\d -> let dimType = if length (dsiDimensions d) == 1 then "1D" else if length (dsiDimensions d) == 2 then "2D" else "ND"
-               in (dimType, dsiDimensions d)) datasets
+  in map (\d -> 
+    let dims = map fromIntegral (dsDimensions (dsiDataspace d)) :: [Int]
+        dimType = case length dims of
+          1 -> "1D"
+          2 -> "2D"
+          _ -> "ND"
+    in (dimType, dims)) datasets
     
 
 

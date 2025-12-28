@@ -67,6 +67,34 @@ jobs:
         if: failure()
         run: make test-verbose
 
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Haskell (Stack)
+        uses: haskell-actions/setup@v2
+        with:
+          enable-stack: true
+          stack-version: 'latest'
+
+      - name: Cache Stack
+        uses: actions/cache@v3
+        with:
+          path: ~/.stack
+          key: ${{ runner.os }}-stack-bench-${{ hashFiles('stack.yaml', 'stack.yaml.lock') }}
+          restore-keys: ${{ runner.os }}-stack-bench-
+
+      - name: Download test files
+        run: |
+          chmod +x download-test-files.sh
+          ./download-test-files.sh
+
+      - name: Run Benchmarks
+        run: make bench
+
   test-matrix:
     name: Test Coverage - ${{ matrix.test-suite }}
     runs-on: ubuntu-latest

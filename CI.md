@@ -27,6 +27,7 @@ Comprehensive Stack-focused testing:
 
 **Jobs**:
 - **stack**: Primary build and test on multiple OS
+- **benchmark**: Performance benchmarking suite (parseSuperblockFromFile, discoverDatasets)
 - **test-matrix**: Parallel test suite execution
 - **quick-check**: Sanity check for code consistency
 
@@ -79,6 +80,7 @@ All workflows leverage our Makefile recipes for consistency:
 | `make test-unit` | Run unit tests only |
 | `make test-integration` | Run integration tests only |
 | `make coverage` | Run tests with coverage |
+| `make bench` | Run benchmark suite |
 | `make status` | Show project build status |
 | `make info` | Display project information |
 | `make diagnose` | Run full diagnostics |

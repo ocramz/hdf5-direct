@@ -27,6 +27,7 @@ import Data.HDF5.Direct.Internal
   , VariableLengthType(..)
   , HDF5Superblock(..)
   , HDF5DatasetInfo(..)
+  , HDF5Dataspace(..)
   , HDF5Introspection(..)
   , validateHDF5Signature
   , describeDatatypeClass
@@ -35,7 +36,6 @@ import Data.HDF5.Direct.Internal
   , assertHDF5WellFormed
   , discoverDatasets
   , parseSuperblockMetadata
-  , dsiDimensions
   )
 
 import Data.HDF5.Direct.Massiv
@@ -107,8 +107,9 @@ forceByteString bs = do
 extractDimensions :: BL.ByteString -> [(String, [Int])]
 extractDimensions bs =
   let datasets = discoverDatasets bs
-  in map (\d -> let dimType = if length (dsiDimensions d) == 1 then "1D" else if length (dsiDimensions d) == 2 then "2D" else "ND"
-               in (dimType, dsiDimensions d)) datasets
+      getDims d = map fromIntegral (dsDimensions (dsiDataspace d))
+  in map (\d -> let dimType = if length (getDims d) == 1 then "1D" else if length (getDims d) == 2 then "2D" else "ND"
+               in (dimType, getDims d)) datasets
 
 -- | Wrapper for assertHDF5WellFormed that works with Hspec
 assertHDF5WellFormedTest :: FilePath -> IO ()
@@ -166,13 +167,13 @@ loadDiscoveredDataset path datasetName = do
         case dimList of
           [n] -> do
             -- Load as 1D array
-            withArray1DFromFile path $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
+            withArray1DFromFile datasetName path $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
               let M.Sz (M.Ix1 size) = M.size arr
               putStrLn $ "  Loaded 1D dataset '" ++ datasetName ++ "' with " ++ show size ++ " elements"
               return (size, 1)
           [m, n] -> do
             -- Load as 2D array
-            withArray2DFromFile path $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
+            withArray2DFromFile datasetName path $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
               let M.Sz (M.Ix2 rows cols) = M.size arr
               putStrLn $ "  Loaded 2D dataset '" ++ datasetName ++ "' with dimensions " ++ show rows ++ " x " ++ show cols
               return (rows, cols)
@@ -979,10 +980,11 @@ spec = do
           when (not $ null datasets) $ do
             putStrLn $ "  All datasets found:"
             forM_ (take 15 datasets) $ \ds -> do
-              let dimStr = case dsiDimensions ds of
+              let dims = map fromIntegral (dsDimensions (dsiDataspace ds))
+                  dimStr = case dims of
                     [] -> "scalar"
                     [n] -> "1D(" ++ show n ++ ")"
-                    dims -> show (length dims) ++ "D" ++ show dims
+                    _ -> show (length dims) ++ "D" ++ show dims
               putStrLn $ "    - " ++ dsiName ds ++ " [" ++ dimStr ++ "]"
 
   --   it "loads all discovered datasets from kosarak-jaccard.hdf5" $ do
