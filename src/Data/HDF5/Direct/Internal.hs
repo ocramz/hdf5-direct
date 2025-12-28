@@ -1921,15 +1921,15 @@ parseExtendedSuperblocV0V1 bs offsetSz lenSz = do
     else pure (rootAddrInt, btreeAddr, heapAddr)
 
 -- | Compatibility wrapper for IO-based discovery
---   Uses the unified discoverDatasets internally
+--   Uses mmap for efficient lazy loading, consistent with withArrayXDFromFile
 discoverDatasetsFromFile :: FilePath -> IO [HDF5DatasetInfo]
 discoverDatasetsFromFile path = do
   exists <- doesFileExist path
   if not exists
     then return []
     else do
-      -- Read file and apply unified metadata parser
-      contents <- BL.readFile path
+      -- Use mmap for lazy loading (consistent with array loading functions)
+      contents <- mmapFileRegion path Nothing
       return $ discoverDatasets contents
 
 -- | Discovers datasets using proper HDF5 metadata binary format parsing

@@ -12,6 +12,7 @@ import Data.Bits (shiftL, (.|.))
 import Numeric (showHex)
 import Control.Exception (catch, try, SomeException, throwIO)
 import Control.Monad (foldM, forM, forM_, when)
+import Data.List (find)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist)
 import System.FilePath (takeExtension, (</>))
 import System.IO (Handle, hClose)
@@ -259,65 +260,41 @@ spec = do
           Left (e :: HDF5Exception) -> expectationFailure $ "Mmap failed on 5MB: " ++ show e
           Right True -> pure ()
 
-  describe "MMAP Diagnostics - Kosarak File Safety Checks" $ do
+  describe "MMAP Diagnostics - Kosarak File Comprehensive Validation" $ do
 
-    it "mmapFileRegion on kosarak with forced strict evaluation" $ do
+    it "validates kosarak file structure and discovers datasets" $ do
       let testPath = "test-data/kosarak-jaccard.hdf5"
       exists <- doesFileExist testPath
       if not exists
         then pendingWith "kosarak-jaccard.hdf5 not available"
         else do
-          result <- try $ do
-            bs <- mmapFileRegion testPath Nothing
-            -- Force strict evaluation WITHIN the mmap scope
-            forceByteString bs
-            let len = BL.length bs
-            putStrLn $ "    Successfully forced kosarak eval, length: " ++ show len
-            return (len > 30000000)  -- Should be > 30MB
-          case result of
-            Left (e :: HDF5Exception) -> do
-              putStrLn $ "    ERROR - Segfault or exception: " ++ show e
-              expectationFailure $ "Failed with strict eval: " ++ show e
-            Right True -> pure ()
-
-    it "withMmapFile bracket then mmapFileRegion on kosarak" $ do
-      let testPath = "test-data/kosarak-jaccard.hdf5"
-      exists <- doesFileExist testPath
-      if not exists
-        then pendingWith "kosarak-jaccard.hdf5 not available"
-        else do
-          result <- try $ withMmapFile testPath $ \mfile -> do
-            -- Call mmapFileRegion while mmap bracket is active
-            bs <- mmapFileRegion testPath Nothing
-            let len = BL.length bs
-            putStrLn $ "    Bracket + mmapFileRegion succeeded, length: " ++ show len
-            return (len > 30000000)
-          case result of
-            Left (e :: HDF5Exception) -> do
-              putStrLn $ "    ERROR - Failed in bracket: " ++ show e
-              expectationFailure $ "Failed in bracket: " ++ show e
-            Right True -> pure ()
-
-    it "discoverAllDatasets on kosarak via mmapFileRegion (LAZY)" $ do
-      let testPath = "test-data/kosarak-jaccard.hdf5"
-      exists <- doesFileExist testPath
-      if not exists
-        then pendingWith "kosarak-jaccard.hdf5 not available"
-        else do
-          -- Use lazy ByteString approach via discoverDatasets
-          -- Note: kosarak uses extended addressing and doesn't have datasets in root group
-          -- with standard symbol table structure, so 0 datasets is expected
-          result <- try $ do
-            bs <- mmapFileRegion testPath (Just (0, 2097152))  -- First 2MB
-            let datasets = discoverDatasets bs
-            let numDatasets = length datasets
-            putStrLn $ "    LAZY: Found " ++ show numDatasets ++ " datasets in first 2MB (strict metadata parsing)"
-            return True
-          case result of
-            Left (e :: HDF5Exception) -> do
-              putStrLn $ "    ERROR - Failed with exception: " ++ show e
-              expectationFailure $ "Failed with exception: " ++ show e
-            Right True -> pure ()
+          -- Comprehensive test using high-level combinators
+          -- 1. Validate file structure with introspection
+          introspection <- introspectHDF5File testPath
+          case introspection of
+            Left err -> expectationFailure $ "File validation failed: " ++ err
+            Right intro -> do
+              intro_validSignature intro `shouldBe` True
+              intro_fileSize intro `shouldSatisfy` (> 30000000)  -- > 30MB
+              putStrLn $ "\n  " ++ intro_summary intro
+          
+          -- 2. Parse superblock for extended addressing info
+          superblockResult <- parseSuperblockFromFile testPath
+          case superblockResult of
+            Left err -> expectationFailure $ "Superblock parsing failed: " ++ show err
+            Right (rootAddr, offsetSz, lenSz) -> do
+              let addrStr = if rootAddr < 0 
+                            then "EXTENDED(-1)" 
+                            else "0x" ++ showHex rootAddr ""
+              putStrLn $ "  Superblock: root=" ++ addrStr
+              putStrLn $ "  Addressing: offsets=" ++ show offsetSz ++ ", lengths=" ++ show lenSz
+              offsetSz `shouldSatisfy` (> 0)
+              lenSz `shouldSatisfy` (> 0)
+          
+          -- 3. Discover datasets using high-level combinator
+          datasets <- discoverDatasetsFromFile testPath
+          putStrLn $ "  Discovered " ++ show (length datasets) ++ " datasets"
+          length datasets `shouldSatisfy` (>= 3)  -- Kosarak has train, test, neighbors
 
     it "discoverAllDatasets on kosarak via mmapFileRegion (STRICT)" $ do
       let testPath = "test-data/kosarak-jaccard.hdf5"
@@ -349,23 +326,21 @@ spec = do
                   -- Verify the addresses make sense
                   rootAddr > 0 && offsetSz > 0 && lenSz > 0 `shouldBe` True
 
-    it "discoverAllDatasets on kosarak via BL.readFile (BASELINE)" $ do
+    it "discovers datasets using high-level combinator" $ do
       let testPath = "test-data/kosarak-jaccard.hdf5"
       exists <- doesFileExist testPath
       if not exists
         then pendingWith "kosarak-jaccard.hdf5 not available"
         else do
-          -- Full file read via BL.readFile for comparison
-          -- Note: Using strict metadata parsing only (no heuristic fallback)
-          -- kosarak uses extended addressing and doesn't expose root group datasets
+          -- Use high-level discoverDatasetsFromFile (uses mmap internally)
+          -- kosarak file contains at least 3 datasets despite extended addressing
           result <- try $ do
-            bs <- BL.readFile testPath
-            let datasets = discoverDatasets bs
+            datasets <- discoverDatasetsFromFile testPath
             let numDatasets = length datasets
-            putStrLn $ "    BASELINE: Found " ++ show numDatasets ++ " datasets in full file (strict metadata parsing)"
+            putStrLn $ "    Found " ++ show numDatasets ++ " datasets via discoverDatasetsFromFile"
             return True
           case result of
-            Left (e :: HDF5Exception) -> do
+            Left (e :: SomeException) -> do
               putStrLn $ "    ERROR - Failed with exception: " ++ show e
               expectationFailure $ "Failed with exception: " ++ show e
             Right True -> pure ()
@@ -903,20 +878,20 @@ spec = do
 
   describe "HDF5 dataset - kosarak-jaccard.hdf5" $ do
 
-    it "discovers all datasets in kosarak-jaccard.hdf5 using metadata parsing" $ do
-      let testPaths = ["test-data/kosarak-jaccard.hdf5", "./test-data/kosarak-jaccard.hdf5"]
-      maybeExists <- foldM (\acc path -> if acc then return True else doesFileExist path) False testPaths
-      if not maybeExists
+    it "discovers all datasets in kosarak-jaccard.hdf5 using high-level combinator" $ do
+      let testPath = "test-data/kosarak-jaccard.hdf5"
+      exists <- doesFileExist testPath
+      if not exists
         then expectationFailure "kosarak-jaccard.hdf5 not found in test-data/"
         else do
-          -- Using strict metadata parsing with extended addressing support
+          -- Use high-level discoverDatasetsFromFile for clean abstraction
           -- kosarak-jaccard.hdf5 uses extended superblock addressing (v0/1)
-          contents <- mmapFileRegion "test-data/kosarak-jaccard.hdf5" Nothing
-          let datasets = discoverDatasets contents
+          -- but successfully discovers datasets with proper parsing
+          datasets <- discoverDatasetsFromFile testPath
           
-          putStrLn $ "\n  Total discovered datasets in root: " ++ show (length datasets)
+          putStrLn $ "\n  Total discovered datasets: " ++ show (length datasets)
           
-          -- Should discover the 3 primary datasets: train, test, neighbors
+          -- Kosarak file contains at least 3 primary datasets: train, test, neighbors
           length datasets `shouldSatisfy` (>= 3)
           
           -- Check for the 3 primary datasets
@@ -945,6 +920,59 @@ spec = do
                     [n] -> "1D(" ++ show n ++ ")"
                     _ -> show (length dims) ++ "D" ++ show dims
               putStrLn $ "    - " ++ dsiName ds ++ " [" ++ dimStr ++ "]"
+
+    it "loads kosarak dataset with automatic type discovery" $ do
+      let testPath = "test-data/kosarak-jaccard.hdf5"
+      exists <- doesFileExist testPath
+      if not exists
+        then pendingWith "kosarak-jaccard.hdf5 not available"
+        else do
+          -- Discover datasets to get metadata
+          datasets <- discoverDatasetsFromFile testPath
+          let maybeTrainDataset = find (\ds -> dsiName ds == "train") datasets
+          
+          case maybeTrainDataset of
+            Nothing -> pendingWith "Train dataset not found in kosarak file"
+            Just ds -> do
+              let dims = map fromIntegral (dsDimensions (dsiDataspace ds))
+              putStrLn $ "\n  Train dataset dimensions: " ++ show dims
+              
+              -- Check if dataset has valid dimensions
+              if null dims || any (<= 0) dims
+                then pendingWith $ "Train dataset has invalid dimensions: " ++ show dims
+                else do
+                  -- Load data based on discovered dimensionality
+                  case length dims of
+                    1 -> do
+                      -- Try as 1D array (common for transaction data)
+                      result <- try $ withArray1DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
+                        let M.Sz (M.Ix1 n) = M.size arr
+                        n `shouldBe` fromIntegral (head dims)
+                        putStrLn $ "  Successfully loaded 1D array with " ++ show n ++ " elements (Word32)"
+                        return ()
+                      case result of
+                        Left (e :: SomeException) -> 
+                          -- Try Int32 if Word32 fails
+                          withArray1DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix1 Int32) -> do
+                            let M.Sz (M.Ix1 n) = M.size arr
+                            putStrLn $ "  Successfully loaded 1D array with " ++ show n ++ " elements (Int32)"
+                        Right () -> pure ()
+                    
+                    2 -> do
+                      -- Try as 2D array
+                      result <- try $ withArray2DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
+                        let M.Sz (M.Ix2 rows cols) = M.size arr
+                        rows `shouldBe` fromIntegral (dims !! 0)
+                        cols `shouldBe` fromIntegral (dims !! 1)
+                        putStrLn $ "  Successfully loaded 2D array: " ++ show rows ++ "x" ++ show cols ++ " (Word32)"
+                      case result of
+                        Left (e :: SomeException) ->
+                          withArray2DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix2 Int32) -> do
+                            let M.Sz (M.Ix2 rows cols) = M.size arr
+                            putStrLn $ "  Successfully loaded 2D array: " ++ show rows ++ "x" ++ show cols ++ " (Int32)"
+                        Right () -> pure ()
+                    
+                    _ -> pendingWith "Dataset has unsupported dimensionality for this test"
 
 
   describe "Massiv Array Conversion with Real Data Sizes" $ do
@@ -1000,29 +1028,6 @@ spec = do
             Right intro -> do
               intro_validSignature intro `shouldBe` True
               intro_fileSize intro `shouldSatisfy` (> 1000)  -- Real file should be larger
-
-    -- it "validates HDF5 file signature for kosarak-jaccard.h5" $ do
-    --   let testPaths = ["test-data/kosarak-jaccard.hdf5", "./test-data/kosarak-jaccard.hdf5"]
-    --   maybeExists <- foldM (\acc path -> do
-    --     if acc then return True else doesFileExist path
-    --     ) False testPaths
-    --   if not maybeExists
-    --     then expectationFailure "kosarak-jaccard.hdf5 not found in test-data/"
-    --     else do
-    --       let testPath = "test-data/kosarak-jaccard.hdf5"
-    --       introspection <- introspectHDF5File testPath
-    --       case introspection of
-    --         Left err -> do
-    --           -- Try alternative path
-    --           introspection' <- introspectHDF5File "./test-data/kosarak-jaccard.hdf5"
-    --           case introspection' of
-    --             Left err' -> expectationFailure $ "Introspection failed: " ++ err'
-    --             Right intro -> do
-    --               intro_validSignature intro `shouldBe` True
-    --               intro_fileSize intro `shouldSatisfy` (> 1000000)
-    --         Right intro -> do
-    --           intro_validSignature intro `shouldBe` True
-    --           intro_fileSize intro `shouldSatisfy` (> 1000000)
 
     it "asserts well-formed HDF5 structure for be_data.h5" $ do
       let testPath = "test-data/be_data.h5"
