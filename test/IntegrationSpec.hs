@@ -283,12 +283,6 @@ spec = do
         Right True -> pure ()
 
   describe "MMAP Diagnostics - Kosarak File Safety Checks" $ do
-    it "can check kosarak file existence" $ do
-      let testPaths = ["test-data/kosarak-jaccard.hdf5", "./test-data/kosarak-jaccard.hdf5"]
-      maybeExists <- foldM (\acc path -> if acc then return True else doesFileExist path) False testPaths
-      if maybeExists
-        then putStrLn "    kosarak-jaccard.hdf5 found - ready for mmap tests"
-        else putStrLn "    kosarak-jaccard.hdf5 NOT found - skipping resource tests"
 
     it "mmapFileRegion on kosarak with forced strict evaluation" $ do
       let testPath = "test-data/kosarak-jaccard.hdf5"
