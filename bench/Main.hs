@@ -4,15 +4,23 @@ module Main (main) where
 
 import Test.BenchPress
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.Massiv.Array as M
+import Data.Word (Word32, Word64)
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
-import Control.Exception (catch, SomeException)
+import Control.Exception (catch, try, SomeException)
 import Control.Monad (filterM)
 
 import Data.HDF5.Direct.Internal
   ( parseSuperblockFromFile
   , discoverDatasets
   , mmapFileRegion
+  )
+
+import Data.HDF5.Direct.Massiv
+  ( withArray1DFromFile
+  , withArray2DFromFile
+  , withArray3DFromFile
   )
 
 -- | Benchmark configuration
@@ -77,6 +85,49 @@ benchmarkFile filePath = do
     bs <- mmapFileRegion filePath Nothing `catch` \(e :: SomeException) ->
       error $ "Failed to mmap: " ++ show e
     return $! BL.length bs
+  
+  putStrLn ""
+  
+  -- Benchmark new loading combinators (single-mmap approach)
+  putStrLn "  withArray1DFromFile (Word32):"
+  result1D <- try $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
+    let M.Sz (M.Ix1 size) = M.size arr
+    return size
+  case result1D of
+    Right size -> do
+      bench 50 $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
+        let M.Sz (M.Ix1 s) = M.size arr
+        return $! s
+      putStrLn $ "    (loaded " ++ show size ++ " elements)"
+    Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
+  
+  putStrLn ""
+  
+  putStrLn "  withArray2DFromFile (Word32):"
+  result2D <- try $ withArray2DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
+    let M.Sz (M.Ix2 rows cols) = M.size arr
+    return (rows, cols)
+  case result2D of
+    Right (rows, cols) -> do
+      bench 50 $ withArray2DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
+        let M.Sz (M.Ix2 r c) = M.size arr
+        return $! (r, c)
+      putStrLn $ "    (loaded " ++ show rows ++ " x " ++ show cols ++ " elements)"
+    Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
+  
+  putStrLn ""
+  
+  putStrLn "  withArray1DFromFile (Word64):"
+  result1D64 <- try $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word64) -> do
+    let M.Sz (M.Ix1 size) = M.size arr
+    return size
+  case result1D64 of
+    Right size -> do
+      bench 50 $ withArray1DFromFile "" filePath $ \(arr :: M.Array M.U M.Ix1 Word64) -> do
+        let M.Sz (M.Ix1 s) = M.size arr
+        return $! s
+      putStrLn $ "    (loaded " ++ show size ++ " elements)"
+    Left (e :: SomeException) -> putStrLn $ "    (skipped: " ++ show e ++ ")"
   
   putStrLn ""
   putStrLn ""

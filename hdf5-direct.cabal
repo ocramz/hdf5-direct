@@ -96,6 +96,7 @@ benchmark hdf5-benchmarks
                      , hdf5-direct
                      , benchpress >= 0.2.2 && < 0.3
                      , bytestring >= 0.10 && < 0.13
+                     , massiv >= 1.0 && < 1.1
                      , directory
                      , filepath
   ghc-options:         -Wall
