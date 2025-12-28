@@ -71,6 +71,7 @@ import Data.HDF5.Direct.Internal
   , HDF5Dataspace(HDF5Dataspace)
   , dsDimensions  -- Import as standalone accessor for HDF5Dataspace
   , HDF5DataLayout(..)
+  , MmapFile(..)
   , withMmapFile
   , mmapFileRegion
   , bytesToWord16
@@ -91,13 +92,20 @@ import qualified Data.Massiv.Array as M
 import Data.Massiv.Array (Array, Ix1, Ix2, Ix3, U)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Unsafe as BSU
 import Data.ByteString.Lazy (ByteString)
+import Foreign.C.Types (CChar)
+import Foreign.Ptr (castPtr)
+import System.IO.Unsafe (unsafePerformIO)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Bits (shiftR)
 import Control.Exception (catch, throwIO, SomeException)
 import Control.Monad (when)
 import Data.List (find)
+import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Ptr (plusPtr)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -370,7 +378,40 @@ createMetadataFromInfo info = do
       elemSize = extractElementSize (dsiDatatype info)
   return $ ArrayMetadata dimStruct totalElems (dsiDatatype info) byteOrder elemSize
 
+-- | Convert MmapFile to lazy ByteString for parsing
+--   Uses the existing mmap without creating a new one
+mmapToByteString :: MmapFile -> ByteString
+mmapToByteString (MmapFile _ fptr offset size) =
+  BL.fromStrict $ unsafePerformIO $ withForeignPtr fptr $ \ptr -> do
+    let actualPtr = ptr `plusPtr` offset
+    BSU.unsafePackCStringLen (castPtr actualPtr, size)
+
+-- | Extract raw data from existing MmapFile based on layout type
+--   Avoids creating a new mmap by using the existing file mapping
+extractDataFromMmap :: MmapFile -> HDF5DataLayout -> IO ByteString
+extractDataFromMmap mmapFile layout = case layout of
+  CompactLayout _ _ rawData ->
+    -- Data is embedded directly in the object header
+    return rawData
+  
+  ContiguousLayout _ addr size -> do
+    -- Extract data region from existing mmap using pointer arithmetic
+    let MmapFile _ fptr _ _ = mmapFile
+        offset = fromIntegral addr
+        dataSize = fromIntegral size
+    return $ BL.fromStrict $ unsafePerformIO $ withForeignPtr fptr $ \ptr -> do
+      let dataPtr = ptr `plusPtr` offset
+      BSU.unsafePackCStringLen (castPtr dataPtr, dataSize)
+  
+  ChunkedLayout _ _ btreeAddr chunkDims elemSize ->
+    -- Chunked layout requires B-tree parsing (not yet implemented)
+    throwIO $ massivErrorToException $ UnsupportedLayout $
+      "Chunked layout not yet supported. Dataset uses B-tree at address " ++
+      show btreeAddr ++ " with chunk dimensions " ++ show chunkDims ++
+      " and element size " ++ show elemSize
+
 -- | Extract raw data from file based on layout type
+--   This version re-mmaps the file (kept for backward compatibility)
 extractDataFromLayout :: FilePath -> HDF5DataLayout -> IO ByteString
 extractDataFromLayout path layout = case layout of
   CompactLayout _ _ rawData ->
@@ -566,6 +607,60 @@ fromMassivArray3D arr =
 massivErrorToException :: MassivError -> HDF5Exception
 massivErrorToException err = ParseError (show err)
 
+-- | Internal helper function to read arrays from HDF5 files with proper mmap usage
+--   Eliminates code duplication across withArray1D/2D/3DFromFile
+--   Uses a single mmap for both metadata discovery and data extraction
+withArrayFromFileInternal
+  :: SupportedElement a
+  => Int                                    -- ^ Expected rank (1, 2, or 3)
+  -> FilePath                               -- ^ HDF5 file path
+  -> String                                 -- ^ Dataset name (empty = first dataset)
+  -> (HDF5Dataset a -> Either MassivError b) -- ^ Converter (toMassivArray1D/2D/3D)
+  -> (b -> IO c)                            -- ^ User action
+  -> IO c
+withArrayFromFileInternal expectedRank path datasetName converter action =
+  withMmapFile path $ \mmapFile -> do
+    -- Discover datasets from existing mmap (no file re-read)
+    let fileContents = mmapToByteString mmapFile
+        datasets = discoverDatasets fileContents
+    
+    -- Find the requested dataset
+    case findDataset datasetName datasets of
+      Nothing -> throwIO $ massivErrorToException $ 
+        DatasetNotFound $ "Dataset '" ++ datasetName ++ "' not found in " ++ path
+      
+      Just dsInfo -> do
+        -- Validate rank
+        case validateDatasetRank expectedRank dsInfo of
+          Left err -> throwIO $ massivErrorToException err
+          Right () -> do
+            -- Create metadata from parsed info
+            metadata <- case createMetadataFromInfo dsInfo of
+              Left err -> throwIO $ massivErrorToException err
+              Right m -> return m
+            
+            -- Extract data from existing mmap (no new mmap)
+            bytes <- catch (extractDataFromMmap mmapFile (dsiLayout dsInfo))
+                           (\(e :: SomeException) -> throwIO $ MmapIOError $ 
+                             "Failed to extract data from layout: " ++ show e)
+            
+            -- Create dataset with real metadata and dimensions
+            let spaceDims = I.dsDimensions (dsiDataspace dsInfo)
+                dims = map fromIntegral spaceDims
+            dimStruct <- case extractDimensions dims of
+              Left err -> throwIO $ massivErrorToException err
+              Right d -> return d
+            
+            let ds = HDF5Dataset metadata bytes dimStruct
+            
+            -- Convert to Massiv array and run action
+            result <- catch (case converter ds of
+                              Left err -> throwIO $ massivErrorToException err
+                              Right arr -> action arr)
+                            (\(e :: SomeException) -> throwIO $ MmapIOError $ 
+                              "Failed to read array: " ++ show e)
+            return result
+
 -- | Safely read a 1D array from a file with mmap
 --   The MmapFile is guaranteed to stay open during the callback.
 --   
@@ -583,42 +678,7 @@ withArray1DFromFile
   -> (Array U Ix1 a -> IO b)
   -> IO b
 withArray1DFromFile path datasetName action =
-  withMmapFile path $ \_ -> do
-    -- Discover datasets in file
-    datasets <- discoverDatasetsFromFile path
-    
-    -- Find the requested dataset
-    case findDataset datasetName datasets of
-      Nothing -> throwIO $ massivErrorToException $ 
-        DatasetNotFound $ "Dataset '" ++ datasetName ++ "' not found in " ++ path
-      
-      Just dsInfo -> do
-        -- Validate it's 1D
-        case validateDatasetRank 1 dsInfo of
-          Left err -> throwIO $ massivErrorToException err
-          Right () -> do
-            -- Create metadata from parsed info
-            metadata <- case createMetadataFromInfo dsInfo of
-              Left err -> throwIO $ massivErrorToException err
-              Right m -> return m
-            
-            -- Extract data based on layout type
-            bytes <- catch (extractDataFromLayout path (dsiLayout dsInfo))
-                           (\(e :: SomeException) -> throwIO $ MmapIOError $ 
-                             "Failed to extract data from layout: " ++ show e)
-            
-            -- Create dataset with real metadata and dimensions
-            let spaceDims = I.dsDimensions (dsiDataspace dsInfo)
-                dimStruct = Dims1D (M.Ix1 (fromIntegral (head spaceDims)))
-                ds = HDF5Dataset metadata bytes dimStruct
-            
-            -- Convert to Massiv array and run action
-            result <- catch (case toMassivArray1D ds of
-                              Left err -> throwIO $ massivErrorToException err
-                              Right arr -> action arr)
-                            (\(e :: SomeException) -> throwIO $ MmapIOError $ 
-                              "Failed to read 1D array: " ++ show e)
-            return result
+  withArrayFromFileInternal 1 path datasetName toMassivArray1D action
 
 -- | Safely read a 2D array from a file with mmap
 --   The MmapFile is guaranteed to stay open during the callback.
@@ -631,43 +691,7 @@ withArray2DFromFile
   -> (Array U Ix2 a -> IO b)
   -> IO b
 withArray2DFromFile path datasetName action =
-  withMmapFile path $ \_ -> do
-    -- Discover datasets in file
-    datasets <- discoverDatasetsFromFile path
-    
-    -- Find the requested dataset
-    case findDataset datasetName datasets of
-      Nothing -> throwIO $ massivErrorToException $ 
-        DatasetNotFound $ "Dataset '" ++ datasetName ++ "' not found in " ++ path
-      
-      Just dsInfo -> do
-        -- Validate it's 2D
-        case validateDatasetRank 2 dsInfo of
-          Left err -> throwIO $ massivErrorToException err
-          Right () -> do
-            -- Create metadata from parsed info
-            metadata <- case createMetadataFromInfo dsInfo of
-              Left err -> throwIO $ massivErrorToException err
-              Right m -> return m
-            
-            -- Extract data based on layout type
-            bytes <- catch (extractDataFromLayout path (dsiLayout dsInfo))
-                           (\(e :: SomeException) -> throwIO $ MmapIOError $ 
-                             "Failed to extract data from layout: " ++ show e)
-            
-            -- Create dataset with real metadata and dimensions
-            let spaceDims = I.dsDimensions (dsiDataspace dsInfo)
-                [n1, n2] = map fromIntegral spaceDims
-                dimStruct = Dims2D (M.Ix2 n1 n2)
-                ds = HDF5Dataset metadata bytes dimStruct
-            
-            -- Convert to Massiv array and run action
-            result <- catch (case toMassivArray2D ds of
-                              Left err -> throwIO $ massivErrorToException err
-                              Right arr -> action arr)
-                            (\(e :: SomeException) -> throwIO $ MmapIOError $ 
-                              "Failed to read 2D array: " ++ show e)
-            return result
+  withArrayFromFileInternal 2 path datasetName toMassivArray2D action
 
 -- | Safely read a 3D array from a file with mmap
 --   The MmapFile is guaranteed to stay open during the callback.
@@ -680,43 +704,7 @@ withArray3DFromFile
   -> (Array U Ix3 a -> IO b)
   -> IO b
 withArray3DFromFile path datasetName action =
-  withMmapFile path $ \_ -> do
-    -- Discover datasets in file
-    datasets <- discoverDatasetsFromFile path
-    
-    -- Find the requested dataset
-    case findDataset datasetName datasets of
-      Nothing -> throwIO $ massivErrorToException $ 
-        DatasetNotFound $ "Dataset '" ++ datasetName ++ "' not found in " ++ path
-      
-      Just dsInfo -> do
-        -- Validate it's 3D
-        case validateDatasetRank 3 dsInfo of
-          Left err -> throwIO $ massivErrorToException err
-          Right () -> do
-            -- Create metadata from parsed info
-            metadata <- case createMetadataFromInfo dsInfo of
-              Left err -> throwIO $ massivErrorToException err
-              Right m -> return m
-            
-            -- Extract data based on layout type
-            bytes <- catch (extractDataFromLayout path (dsiLayout dsInfo))
-                           (\(e :: SomeException) -> throwIO $ MmapIOError $ 
-                             "Failed to extract data from layout: " ++ show e)
-            
-            -- Create dataset with real metadata and dimensions
-            let spaceDims = I.dsDimensions (dsiDataspace dsInfo)
-                [n1, n2, n3] = map fromIntegral spaceDims
-                dimStruct = Dims3D (M.Ix3 n1 n2 n3)
-                ds = HDF5Dataset metadata bytes dimStruct
-            
-            -- Convert to Massiv array and run action
-            result <- catch (case toMassivArray3D ds of
-                              Left err -> throwIO $ massivErrorToException err
-                              Right arr -> action arr)
-                            (\(e :: SomeException) -> throwIO $ MmapIOError $ 
-                              "Failed to read 3D array: " ++ show e)
-            return result
+  withArrayFromFileInternal 3 path datasetName toMassivArray3D action
 
 -- | Write a 1D Massiv array to a file
 writeArrayAsDataset1D
