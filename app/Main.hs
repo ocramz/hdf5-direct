@@ -34,5 +34,16 @@ testReadHDF5 filepath = do
   putStrLn "\nDataset Discovery (unified pure + IO version):"
   bs <- BL.readFile filepath
   let datasets = discoverDatasets bs
-  putStrLn $ "Discovered " ++ show (length datasets) ++ " datasets"
-  mapM_ (\d -> putStrLn $ "  - " ++ dsiName d ++ ": " ++ show (dsDimensions (dsiDataspace d))) datasets
+  putStrLn $ "Discovered " ++ show (length datasets) ++ " datasets:"
+  mapM_ printDatasetInfo datasets
+  where
+    printDatasetInfo d = 
+      let dims = dsDimensions (dsiDataspace d)
+          dimStr = show dims
+          shapeDesc = case length dims of
+            0 -> "scalar"
+            1 -> "1D array"
+            2 -> "2D array"
+            3 -> "3D array"
+            n -> show n ++ "D array"
+      in putStrLn $ "  - " ++ dsiName d ++ " " ++ dimStr ++ "  \t← " ++ shapeDesc
