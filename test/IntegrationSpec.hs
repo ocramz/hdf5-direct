@@ -7,15 +7,15 @@ module IntegrationSpec
 
 import Test.Hspec
 import qualified Data.ByteString.Lazy as BL
-import Data.Word ()
-import Data.Bits (shiftL, (.|.))
+import Data.Word (Word64)
+import Data.Int (Int32)
 import Numeric (showHex)
-import Control.Exception (catch, try, SomeException, throwIO)
-import Control.Monad (foldM, forM, forM_, when)
+import Control.Exception (catch, try, SomeException)
+import Control.Monad (forM_, when)
 import Data.List (find)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist)
-import System.FilePath (takeExtension, (</>))
-import System.IO (Handle, hClose)
+import System.FilePath (takeExtension)
+import System.IO (hClose)
 import System.IO.Temp (withSystemTempFile)
 
 import Data.HDF5.Direct.Internal
@@ -28,23 +28,16 @@ import Data.HDF5.Direct.Internal
   , ByteOrder(..)
   , FixedPointType(..)
   , VariableLengthType(..)
-  , HDF5Superblock(..)
   , HDF5DatasetInfo(..)
   , HDF5Dataspace(..)
   , HDF5Introspection(..)
   , validateHDF5Signature
-  , describeDatatypeClass
-  , formatDatatype
   , introspectHDF5File
-  , assertHDF5WellFormed
-  , discoverDatasets
-  , parseSuperblockMetadata
   )
 
 import Data.HDF5.Direct.Massiv
   ( withArray1DFromFile
   , withArray2DFromFile
-  , withArray3DFromFile
   , createDataset1D
   , createDataset2D
   , toMassivArray1D
@@ -53,18 +46,12 @@ import Data.HDF5.Direct.Massiv
   , fromMassivArray2D
   , writeArrayAsDataset1D
   , writeArrayAsDataset2D
-  , MassivError(..)
-  , SomeDimensions(..)
-  , discoverDatasets
   , discoverDatasetsFromFile
   )
 
 import qualified Data.Massiv.Array as M
-import Data.Massiv.Array (Array, Ix1, Ix2, U)
-import Data.Int (Int32)
+import Data.Massiv.Array (Ix1, Ix2, U)
 import Data.Word (Word32)
-import Data.IORef (newIORef, writeIORef, readIORef)
-import qualified Data.ByteString as BS (replicate)
 
 -- Helper for try with proper type inference
 tryHDF5 :: IO a -> IO (Either HDF5Exception a)
@@ -105,7 +92,7 @@ testMmapWithSize fileSize =
 -- | Force full evaluation of a lazy ByteString
 forceByteString :: BL.ByteString -> IO ()
 forceByteString bs = do
-  let !len = BL.length bs
+  let !_ = BL.length bs
   return ()
 
 -- | Wrapper for assertHDF5WellFormed that works with Hspec
@@ -119,8 +106,8 @@ assertHDF5WellFormedTest path = do
       intro_fileSize intro `shouldSatisfy` (> 8)  -- At least signature + superblock start
 
 -- | Assert Massiv 1D array is well-formed
-assertMassiv1DWellFormed :: (Show a) => M.Array U Ix1 a -> String -> IO ()
-assertMassiv1DWellFormed arr name = do
+assertMassiv1DWellFormed :: M.Array U Ix1 a -> String -> IO ()
+assertMassiv1DWellFormed arr _ = do
   case M.size arr of
     M.Sz (M.Ix1 n) -> do
       n `shouldSatisfy` (> 0)
@@ -130,8 +117,8 @@ assertMassiv1DWellFormed arr name = do
         else pure ()
 
 -- | Assert Massiv 2D array is well-formed
-assertMassiv2DWellFormed :: (Show a) => M.Array U Ix2 a -> String -> IO ()
-assertMassiv2DWellFormed arr name = do
+assertMassiv2DWellFormed :: M.Array U Ix2 a -> String -> IO ()
+assertMassiv2DWellFormed arr _ = do
   case M.size arr of
     M.Sz (M.Ix2 rows cols) -> do
       rows `shouldSatisfy` (> 0)
@@ -139,35 +126,6 @@ assertMassiv2DWellFormed arr name = do
       let totalElements = rows * cols
       totalElements `shouldSatisfy` (> 0)
 
--- | Assert bytestring has valid HDF5 signature
-assertHDF5Signature :: BL.ByteString -> IO ()
-assertHDF5Signature bs = do
-  BL.length bs `shouldSatisfy` (>= 8)
-  validateHDF5Signature bs `shouldBe` True
-
-
--- | Try to load a dataset by name from an HDF5 file using Massiv API
--- Uses single-mmap approach via withArrayXDFromFile combinators
-loadDiscoveredDataset :: FilePath -> String -> IO (Either String (Int, Int))
-loadDiscoveredDataset path datasetName = do
-  -- Try loading as 1D array first
-  result1D <- try $ withArray1DFromFile datasetName path $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
-    let M.Sz (M.Ix1 size) = M.size arr
-    putStrLn $ "  Loaded 1D dataset '" ++ datasetName ++ "' with " ++ show size ++ " elements"
-    return (size, 1)
-  
-  case result1D of
-    Right dims -> return $ Right dims
-    Left (_ :: SomeException) -> do
-      -- Try loading as 2D array
-      result2D <- try $ withArray2DFromFile datasetName path $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
-        let M.Sz (M.Ix2 rows cols) = M.size arr
-        putStrLn $ "  Loaded 2D dataset '" ++ datasetName ++ "' with dimensions " ++ show rows ++ " x " ++ show cols
-        return (rows, cols)
-      
-      case result2D of
-        Right dims -> return $ Right dims
-        Left (e :: SomeException) -> return $ Left $ "Failed to load dataset: " ++ show e
 
 -- | Test suite for integration with real HDF5 files from the HDFGroup repository
 spec :: Spec
@@ -213,7 +171,7 @@ spec = do
           return (True :: Bool)
         case result of
           Left (e :: HDF5Exception) -> expectationFailure $ "Failed with forced eval: " ++ show e
-          Right True -> pure ()
+          Right _ -> pure ()
 
     it "mmapFileRegion + lazy evaluation works with small file" $ do
       withTestFile 102400 $ \testPath -> do
@@ -224,7 +182,7 @@ spec = do
           return (len > 0)
         case result of
           Left (e :: HDF5Exception) -> expectationFailure $ "Failed with lazy eval: " ++ show e
-          Right True -> pure ()
+          Right valid -> valid `shouldBe` True
 
   describe "MMAP Diagnostics - withMmapFile vs mmapFileRegion" $ do
     it "mmapFileRegion called inside withMmapFile preserves ByteString" $ do
@@ -235,7 +193,7 @@ spec = do
           return (len == 102400)
         case result of
           Left (e :: HDF5Exception) -> expectationFailure $ "Failed in bracket: " ++ show e
-          Right True -> pure ()
+          Right valid -> valid `shouldBe` True
 
     it "mmapFileRegion called outside withMmapFile scope works" $ do
       withTestFile 102400 $ \testPath -> do
@@ -245,7 +203,7 @@ spec = do
           return (len == 102400)
         case result of
           Left (e :: HDF5Exception) -> expectationFailure $ "Failed outside bracket: " ++ show e
-          Right True -> pure ()
+          Right valid -> valid `shouldBe` True
 
   describe "MMAP Diagnostics - Computation Path Isolation" $ do
     it "mmapFileRegion alone with large file succeeds" $ do
@@ -258,7 +216,7 @@ spec = do
           return (len == 5242880)
         case result of
           Left (e :: HDF5Exception) -> expectationFailure $ "Mmap failed on 5MB: " ++ show e
-          Right True -> pure ()
+          Right valid -> valid `shouldBe` True
 
   describe "MMAP Diagnostics - Kosarak File Comprehensive Validation" $ do
 
@@ -321,7 +279,7 @@ spec = do
                   -- Still a successful parse even if root address is invalid
                   offsetSz > 0 && lenSz > 0 `shouldBe` True
                 else do
-                  putStrLn $ "    STRICT: Root @ 0x" ++ showHex (fromIntegral rootAddr) "" 
+                  putStrLn $ "    STRICT: Root @ 0x" ++ showHex rootAddr "" 
                             ++ ", offsets=" ++ show offsetSz ++ ", lengths=" ++ show lenSz
                   -- Verify the addresses make sense
                   rootAddr > 0 && offsetSz > 0 && lenSz > 0 `shouldBe` True
@@ -343,7 +301,7 @@ spec = do
             Left (e :: SomeException) -> do
               putStrLn $ "    ERROR - Failed with exception: " ++ show e
               expectationFailure $ "Failed with exception: " ++ show e
-            Right True -> pure ()
+            Right _ -> pure ()
 
   -- ========================================================================
   -- END OF MMAP DEBUGGING TEST SUITE
@@ -914,7 +872,7 @@ spec = do
           when (not $ null datasets) $ do
             putStrLn $ "  All datasets found:"
             forM_ (take 15 datasets) $ \ds -> do
-              let dims = map fromIntegral (dsDimensions (dsiDataspace ds))
+              let dims = dsDimensions (dsiDataspace ds)
                   dimStr = case dims of
                     [] -> "scalar"
                     [n] -> "1D(" ++ show n ++ ")"
@@ -934,7 +892,7 @@ spec = do
           case maybeTrainDataset of
             Nothing -> pendingWith "Train dataset not found in kosarak file"
             Just ds -> do
-              let dims = map fromIntegral (dsDimensions (dsiDataspace ds))
+              let dims = dsDimensions (dsiDataspace ds)
               putStrLn $ "\n  Train dataset dimensions: " ++ show dims
               
               -- Check if dataset has valid dimensions
@@ -947,11 +905,13 @@ spec = do
                       -- Try as 1D array (common for transaction data)
                       result <- try $ withArray1DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix1 Word32) -> do
                         let M.Sz (M.Ix1 n) = M.size arr
-                        n `shouldBe` fromIntegral (head dims)
+                        case dims of
+                          (d:_) -> n `shouldBe` fromIntegral (d :: Word64)
+                          [] -> expectationFailure "Empty dimensions"
                         putStrLn $ "  Successfully loaded 1D array with " ++ show n ++ " elements (Word32)"
                         return ()
                       case result of
-                        Left (e :: SomeException) -> 
+                        Left (_ :: SomeException) -> 
                           -- Try Int32 if Word32 fails
                           withArray1DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix1 Int32) -> do
                             let M.Sz (M.Ix1 n) = M.size arr
@@ -962,11 +922,11 @@ spec = do
                       -- Try as 2D array
                       result <- try $ withArray2DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix2 Word32) -> do
                         let M.Sz (M.Ix2 rows cols) = M.size arr
-                        rows `shouldBe` fromIntegral (dims !! 0)
-                        cols `shouldBe` fromIntegral (dims !! 1)
+                        rows `shouldBe` fromIntegral (dims !! 0 :: Word64)
+                        cols `shouldBe` fromIntegral (dims !! 1 :: Word64)
                         putStrLn $ "  Successfully loaded 2D array: " ++ show rows ++ "x" ++ show cols ++ " (Word32)"
                       case result of
-                        Left (e :: SomeException) ->
+                        Left (_ :: SomeException) ->
                           withArray2DFromFile testPath "train" $ \(arr :: M.Array M.U M.Ix2 Int32) -> do
                             let M.Sz (M.Ix2 rows cols) = M.size arr
                             putStrLn $ "  Successfully loaded 2D array: " ++ show rows ++ "x" ++ show cols ++ " (Int32)"

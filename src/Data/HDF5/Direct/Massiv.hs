@@ -68,12 +68,9 @@ import Data.HDF5.Direct.Internal
   , BitfieldType(..)
   , OpaqueType(..)
   , ByteOrder(..)
-  , HDF5Dataspace(HDF5Dataspace)
-  , dsDimensions  -- Import as standalone accessor for HDF5Dataspace
   , HDF5DataLayout(..)
   , MmapFile(..)
   , withMmapFile
-  , mmapFileRegion
   , bytesToWord16
   , bytesToWord32
   , bytesToWord64
@@ -83,7 +80,6 @@ import Data.HDF5.Direct.Internal
   , writeHDF5File
   , HDF5Superblock(..)
   , HDF5DatasetInfo(..)
-  , parseSuperblockVersion
   , discoverDatasets
   , discoverDatasetsFromFile
   )
@@ -92,17 +88,13 @@ import qualified Data.Massiv.Array as M
 import Data.Massiv.Array (Array, Ix1, Ix2, Ix3, U)
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Unsafe as BSU
 import Data.ByteString.Lazy (ByteString)
-import Foreign.C.Types (CChar)
 import Foreign.Ptr (castPtr)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Int (Int8, Int16, Int32, Int64)
-import Data.Bits (shiftR)
 import Control.Exception (catch, throwIO, SomeException)
-import Control.Monad (when)
 import Data.List (find)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (plusPtr)
@@ -295,16 +287,6 @@ instance SupportedElement Int64 where
     Left _ -> Left (ByteLengthMismatch 8 (length bs))
   writeElement order i =
     word64ToBytes order (fromIntegral i)
-  writeElement LittleEndian i =
-    let w = fromIntegral i :: Word64
-    in [fromIntegral w, fromIntegral (w `shiftR` 8), fromIntegral (w `shiftR` 16),
-        fromIntegral (w `shiftR` 24), fromIntegral (w `shiftR` 32), fromIntegral (w `shiftR` 40),
-        fromIntegral (w `shiftR` 48), fromIntegral (w `shiftR` 56)]
-  writeElement BigEndian i =
-    let w = fromIntegral i :: Word64
-    in [fromIntegral (w `shiftR` 56), fromIntegral (w `shiftR` 48), fromIntegral (w `shiftR` 40),
-        fromIntegral (w `shiftR` 32), fromIntegral (w `shiftR` 24), fromIntegral (w `shiftR` 16),
-        fromIntegral (w `shiftR` 8), fromIntegral w]
 
 -- | Unsigned 64-bit integer
 instance SupportedElement Word64 where
@@ -314,14 +296,6 @@ instance SupportedElement Word64 where
     Right w -> Right w
     Left _ -> Left (ByteLengthMismatch 8 (length bs))
   writeElement order w = word64ToBytes order w
-  writeElement LittleEndian w =
-    [fromIntegral w, fromIntegral (w `shiftR` 8), fromIntegral (w `shiftR` 16),
-     fromIntegral (w `shiftR` 24), fromIntegral (w `shiftR` 32), fromIntegral (w `shiftR` 40),
-     fromIntegral (w `shiftR` 48), fromIntegral (w `shiftR` 56)]
-  writeElement BigEndian w =
-    [fromIntegral (w `shiftR` 56), fromIntegral (w `shiftR` 48), fromIntegral (w `shiftR` 40),
-     fromIntegral (w `shiftR` 32), fromIntegral (w `shiftR` 24), fromIntegral (w `shiftR` 16),
-     fromIntegral (w `shiftR` 8), fromIntegral w]
 
 -- ============================================================================
 -- Helper Functions for Metadata Extraction
@@ -411,24 +385,6 @@ extractDataFromMmap mmapFile layout = case layout of
       " and element size " ++ show elemSize
 
 -- | Extract raw data from file based on layout type
---   This version re-mmaps the file (kept for backward compatibility)
-extractDataFromLayout :: FilePath -> HDF5DataLayout -> IO ByteString
-extractDataFromLayout path layout = case layout of
-  CompactLayout _ _ rawData ->
-    -- Data is embedded directly in the object header
-    return rawData
-  
-  ContiguousLayout _ addr size ->
-    -- Data is stored contiguously at a specific file offset
-    mmapFileRegion path (Just (fromIntegral addr, fromIntegral size))
-  
-  ChunkedLayout _ _ btreeAddr chunkDims elemSize ->
-    -- Chunked layout requires B-tree parsing (not yet implemented)
-    throwIO $ massivErrorToException $ UnsupportedLayout $
-      "Chunked layout not yet supported. Dataset uses B-tree at address " ++
-      show btreeAddr ++ " with chunk dimensions " ++ show chunkDims ++
-      " and element size " ++ show elemSize
-
 -- ============================================================================
 -- Core Operations
 -- ============================================================================
@@ -444,7 +400,7 @@ getArrayMetadata = dsMetadata
 -- | Internal: Create a new HDF5 dataset with arbitrary dimensions
 --   (For testing purposes - production code should use bracket-based API)
 createDatasetND
-  :: (SupportedElement a, VU.Unbox a)
+  :: SupportedElement a
   => [Int]                    -- ^ Dimension sizes
   -> a                        -- ^ Sample element (for type inference)
   -> Either MassivError (HDF5Dataset a)
@@ -464,7 +420,7 @@ createDatasetND dims sample = do
 
 -- | Internal: Create a new 1D HDF5 dataset with specified size
 createDataset1D
-  :: (SupportedElement a, VU.Unbox a)
+  :: SupportedElement a
   => Int                      -- ^ Dimension size
   -> a                        -- ^ Sample element (for type inference)
   -> Either MassivError (HDF5Dataset a)
@@ -472,7 +428,7 @@ createDataset1D n sample = createDatasetND [n] sample
 
 -- | Internal: Create a new 2D HDF5 dataset with specified dimensions
 createDataset2D
-  :: (SupportedElement a, VU.Unbox a)
+  :: SupportedElement a
   => Int                      -- ^ Dimension 1 size
   -> Int                      -- ^ Dimension 2 size
   -> a                        -- ^ Sample element (for type inference)
@@ -481,7 +437,7 @@ createDataset2D n1 n2 sample = createDatasetND [n1, n2] sample
 
 -- | Internal: Create a new 3D HDF5 dataset with specified dimensions
 createDataset3D
-  :: (SupportedElement a, VU.Unbox a)
+  :: SupportedElement a
   => Int                      -- ^ Dimension 1 size
   -> Int                      -- ^ Dimension 2 size
   -> Int                      -- ^ Dimension 3 size
@@ -524,7 +480,7 @@ toMassivArray3D (HDF5Dataset metadata bytes dims) = case dims of
 
 -- | Helper function to convert lazy ByteString to 1D array
 byteDataToArray1D
-  :: (SupportedElement a, VU.Unbox a)
+  :: SupportedElement a
   => Int              -- ^ Expected number of elements
   -> ByteString       -- ^ Lazy byte data from mmap
   -> ByteOrder        -- ^ Byte order
@@ -611,8 +567,7 @@ massivErrorToException err = ParseError (show err)
 --   Eliminates code duplication across withArray1D/2D/3DFromFile
 --   Uses a single mmap for both metadata discovery and data extraction
 withArrayFromFileInternal
-  :: SupportedElement a
-  => Int                                    -- ^ Expected rank (1, 2, or 3)
+  :: Int                                    -- ^ Expected rank (1, 2, or 3)
   -> FilePath                               -- ^ HDF5 file path
   -> String                                 -- ^ Dataset name (empty = first dataset)
   -> (HDF5Dataset a -> Either MassivError b) -- ^ Converter (toMassivArray1D/2D/3D)

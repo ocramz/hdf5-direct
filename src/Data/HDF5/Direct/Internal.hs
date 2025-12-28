@@ -2,6 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE BangPatterns #-}
+{-# OPTIONS_GHC -Wno-partial-fields #-}
 
 module Data.HDF5.Direct.Internal
   ( -- * Exception handling
@@ -89,22 +90,21 @@ module Data.HDF5.Direct.Internal
   ) where
 
 import Control.Exception (Exception, bracket, catch, throwIO, SomeException, displayException, try)
-import Control.Monad (when)
 import Data.Binary.Get (Get)
 import Data.Binary.Put (Put, runPut)
 import Data.Bits (shiftL, shiftR, (.|.), (.&.), testBit)
 import Data.ByteString.Lazy (ByteString)
 import Data.Char (toLower)
 import Data.Int (Int64)
-import Data.List (isSubsequenceOf, tails, nub, nubBy)
-import Data.Maybe (fromMaybe, catMaybes)
+import Data.List (isSubsequenceOf, nub)
+import Data.Maybe (catMaybes, listToMaybe)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Foreign.ForeignPtr (ForeignPtr)
 import GHC.Generics (Generic)
 import Numeric (showHex)
 import qualified Data.Binary.Get as Get
 import qualified Data.ByteString.Lazy as BL
-import System.Directory (doesFileExist, getFileSize)
+import System.Directory (doesFileExist)
 import System.IO (withFile, IOMode(WriteMode, AppendMode), hFlush)
 import System.IO.MMap (Mode(ReadOnly), mmapFileByteStringLazy, mmapFileForeignPtr)
 
@@ -134,8 +134,6 @@ data HDF5ParseError
 -- | Parser monad for composable HDF5 metadata parsing
 --   Using Either for clean error propagation
 type HDF5ParserM a = Either HDF5ParseError a
-runHDF5Parser :: HDF5ParserM a -> Either HDF5ParseError a
-runHDF5Parser = id
 
 -- | Memory-mapped HDF5 file handle with resource management
 data MmapFile = MmapFile
@@ -643,6 +641,7 @@ data HDF5DataLayout
       }
   deriving (Show, Eq)
 
+
 -- | HDF5 standard filter identifiers
 data FilterID
   = DeflateFilter      -- ^ 1: gzip/deflate compression
@@ -753,7 +752,7 @@ isDatasetName s =
                  "feature", "label", "index", "knn", "set", "array", 
                  "dset", "dataset", "var", "field"]
       hasKeyword = any (\kw -> isSubsequenceOf kw lower) keywords
-  in isReasonable && (hasKeyword || (head s `elem` ['a'..'z'] ++ ['A'..'Z'] ++ "_"))
+  in isReasonable && (hasKeyword || maybe False (`elem` (['a'..'z'] ++ ['A'..'Z'] ++ "_")) (listToMaybe s))
   where
     isIdentifierChar c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
                          (c >= '0' && c <= '9') || c == '_' || c == '-'
@@ -790,13 +789,15 @@ convertWord32 :: ByteOrder -> BL.ByteString -> Word32
 convertWord32 LittleEndian bs
   | BL.length bs < 4 = 0
   | otherwise =
-    let [b0, b1, b2, b3] = map (fromIntegral . fromIntegral) (BL.unpack (BL.take 4 bs)) :: [Word32]
-    in b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24)
+    case map (fromIntegral :: Word8 -> Word32) (BL.unpack (BL.take 4 bs)) of
+      [b0, b1, b2, b3] -> b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24)
+      _ -> 0  -- Should never happen due to length check
 convertWord32 BigEndian bs
   | BL.length bs < 4 = 0
   | otherwise =
-    let [b3,b2,b1,b0] = map fromIntegral (BL.unpack (BL.take 4 bs)) :: [Word32]
-    in (b3 `shiftL` 24) .|. (b2 `shiftL` 16) .|. (b1 `shiftL` 8) .|. b0
+    case map fromIntegral (BL.unpack (BL.take 4 bs)) :: [Word32] of
+      [b3,b2,b1,b0] -> (b3 `shiftL` 24) .|. (b2 `shiftL` 16) .|. (b1 `shiftL` 8) .|. b0
+      _ -> 0  -- Should never happen due to length check
 
 -- | Convert 8 bytes to Word64 in specified byte order
 convertWord64 :: ByteOrder -> BL.ByteString -> Word64
@@ -804,16 +805,20 @@ convertWord64 LittleEndian bs
   | BL.length bs < 8 = 0
   | otherwise =
     let bytes = BL.take 8 bs
-        [b0,b1,b2,b3,b4,b5,b6,b7] = map fromIntegral (BL.unpack bytes) :: [Word64]
-    in b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24) .|.
-       (b4 `shiftL` 32) .|. (b5 `shiftL` 40) .|. (b6 `shiftL` 48) .|. (b7 `shiftL` 56)
+    in case map fromIntegral (BL.unpack bytes) :: [Word64] of
+      [b0,b1,b2,b3,b4,b5,b6,b7] -> 
+        b0 .|. (b1 `shiftL` 8) .|. (b2 `shiftL` 16) .|. (b3 `shiftL` 24) .|.
+        (b4 `shiftL` 32) .|. (b5 `shiftL` 40) .|. (b6 `shiftL` 48) .|. (b7 `shiftL` 56)
+      _ -> 0  -- Should never happen due to length check
 convertWord64 BigEndian bs
   | BL.length bs < 8 = 0
   | otherwise =
     let bytes = BL.take 8 bs
-        [b0,b1,b2,b3,b4,b5,b6,b7] = map fromIntegral (BL.unpack bytes) :: [Word64]
-    in (b7 `shiftL` 56) .|. (b6 `shiftL` 48) .|. (b5 `shiftL` 40) .|. (b4 `shiftL` 32) .|.
-       (b3 `shiftL` 24) .|. (b2 `shiftL` 16) .|. (b1 `shiftL` 8) .|. b0
+    in case map fromIntegral (BL.unpack bytes) :: [Word64] of
+      [b0,b1,b2,b3,b4,b5,b6,b7] -> 
+        (b7 `shiftL` 56) .|. (b6 `shiftL` 48) .|. (b5 `shiftL` 40) .|. (b4 `shiftL` 32) .|.
+        (b3 `shiftL` 24) .|. (b2 `shiftL` 16) .|. (b1 `shiftL` 8) .|. b0
+      _ -> 0  -- Should never happen due to length check
 
 -- | Check if HDF5 file signature is valid
 validateHDF5Signature :: BL.ByteString -> Bool
@@ -923,38 +928,39 @@ word64LE = convertWord64 LittleEndian
 byteAt :: BL.ByteString -> Int64 -> HDF5ParserM Word8
 byteAt bs off
   | off < 0 = Left $ CorruptedMetadata $ "Negative offset: " ++ show off
-  | fromIntegral (BL.length bs) <= off = 
+  | BL.length bs <= off = 
     Left $ TruncatedData $ "Reading byte at offset " ++ show off ++ ", but ByteString is only " ++ show (BL.length bs) ++ " bytes"
-  | otherwise = Right (BL.index bs (fromIntegral off))
+  | otherwise = Right (BL.index bs off)
 
 -- | Read Word16 little-endian at specific offset (strict error handling)
 word16LEAt :: BL.ByteString -> Int64 -> HDF5ParserM Word16
 word16LEAt bs off
   | off < 0 = Left $ CorruptedMetadata $ "Negative offset: " ++ show off
-  | fromIntegral (BL.length bs) < off + 2 = 
-    Left $ TruncatedData $ "Reading Word16 at offset " ++ show off ++ ", need 2 bytes, but only " ++ show (fromIntegral (BL.length bs) - off) ++ " available"
+  | BL.length bs < off + 2 = 
+    Left $ TruncatedData $ "Reading Word16 at offset " ++ show off ++ ", need 2 bytes, but only " ++ show (BL.length bs - off) ++ " available"
   | otherwise =
-    let [b0, b1] = BL.unpack (BL.take 2 (BL.drop (fromIntegral off) bs))
-    in Right (fromIntegral b0 .|. (fromIntegral b1 `shiftL` 8))
+    case BL.unpack (BL.take 2 (BL.drop off bs)) of
+      [b0, b1] -> Right (fromIntegral b0 .|. (fromIntegral b1 `shiftL` 8))
+      _ -> Left $ CorruptedMetadata "Unexpected byte count in word16LEAt"
 
 -- | Read Word32 little-endian at specific offset (strict error handling)
 word32LEAt :: BL.ByteString -> Int64 -> HDF5ParserM Word32
 word32LEAt bs off
   | off < 0 = Left $ CorruptedMetadata $ "Negative offset: " ++ show off
-  | fromIntegral (BL.length bs) < off + 4 = 
-    Left $ TruncatedData $ "Reading Word32 at offset " ++ show off ++ ", need 4 bytes, but only " ++ show (fromIntegral (BL.length bs) - off) ++ " available"
+  | BL.length bs < off + 4 = 
+    Left $ TruncatedData $ "Reading Word32 at offset " ++ show off ++ ", need 4 bytes, but only " ++ show (BL.length bs - off) ++ " available"
   | otherwise =
-    let chunk = BL.take 4 (BL.drop (fromIntegral off) bs)
+    let chunk = BL.take 4 (BL.drop off bs)
     in Right (convertWord32 LittleEndian chunk)
 
 -- | Read Word64 little-endian at specific offset (strict error handling)
 word64LEAt :: BL.ByteString -> Int64 -> HDF5ParserM Word64
 word64LEAt bs off
   | off < 0 = Left $ CorruptedMetadata $ "Negative offset: " ++ show off
-  | fromIntegral (BL.length bs) < off + 8 = 
-    Left $ TruncatedData $ "Reading Word64 at offset " ++ show off ++ ", need 8 bytes, but only " ++ show (fromIntegral (BL.length bs) - off) ++ " available"
+  | BL.length bs < off + 8 = 
+    Left $ TruncatedData $ "Reading Word64 at offset " ++ show off ++ ", need 8 bytes, but only " ++ show (BL.length bs - off) ++ " available"
   | otherwise =
-    let chunk = BL.take 8 (BL.drop (fromIntegral off) bs)
+    let chunk = BL.take 8 (BL.drop off bs)
     in Right (convertWord64 LittleEndian chunk)
 
 -- | Read ByteString of specified length at offset (strict error handling)
@@ -962,9 +968,9 @@ byteStringAt :: BL.ByteString -> Int64 -> Int64 -> HDF5ParserM BL.ByteString
 byteStringAt bs off len
   | off < 0 = Left $ CorruptedMetadata $ "Negative offset: " ++ show off
   | len < 0 = Left $ CorruptedMetadata $ "Negative length: " ++ show len
-  | fromIntegral (BL.length bs) < off + len =
-    Left $ TruncatedData $ "Reading " ++ show len ++ " bytes at offset " ++ show off ++ ", but only " ++ show (fromIntegral (BL.length bs) - off) ++ " available"
-  | otherwise = Right (BL.take (fromIntegral len) (BL.drop (fromIntegral off) bs))
+  | BL.length bs < off + len =
+    Left $ TruncatedData $ "Reading " ++ show len ++ " bytes at offset " ++ show off ++ ", but only " ++ show (BL.length bs - off) ++ " available"
+  | otherwise = Right (BL.take len (BL.drop off bs))
 
 -- | Parse superblock metadata: extract root group object header address and size info (STRICT)
 --   Returns (rootHeaderAddress, offsetSize, lengthSize)
@@ -1036,10 +1042,10 @@ parseSuperblockV0V1 bs _ver = do
             pure (fromIntegral addr :: Int64)
         
         -- Check for extended addressing marker
-        -- In v0/v1, extended addressing is indicated by root address being 0xffffffff or 0xffffffffffffffff
+        -- In v0/v1, extended addressing is indicated by root address being all Fs
         let isExtendedAddressing = case offsetSz of
               4 -> rootAddr == 0xffffffff
-              _ -> rootAddr == 0xffffffffffffffff
+              _ -> rootAddr == fromIntegral (maxBound :: Word64)
         
         if isExtendedAddressing
           then do
@@ -1081,7 +1087,7 @@ parseSuperblockV2V3 bs ver = do
           else do
             -- Check file consistency flags (byte 11)
             flags <- byteAt bs 11
-            let flagByte = fromIntegral flags :: Word8
+            let flagByte = flags :: Word8
             
             -- Bit 5 of flags indicates extended addressing
             -- If set, the root group object header address is stored at a different location
@@ -1097,13 +1103,14 @@ parseSuperblockV2V3 bs ver = do
                 -- With extended addressing, root address is at the end of main superblock fields
                 -- Main fields size: 20 bytes (signature) + 8 bytes (through byte 28)
                 -- Root address field position: 20 + offsetSz
-                let rootAddrOffset = 20 + fromIntegral offsetSz
+                let rootAddrOffset :: Int64
+                    rootAddrOffset = 20 + fromIntegral offsetSz
                 case offsetSz of
                   4 -> do
-                    addr <- word32LEAt bs (fromIntegral rootAddrOffset)
+                    addr <- word32LEAt bs rootAddrOffset
                     pure (fromIntegral addr :: Int64)
                   _ -> do  -- 8 bytes
-                    addr <- word64LEAt bs (fromIntegral rootAddrOffset)
+                    addr <- word64LEAt bs rootAddrOffset
                     pure (fromIntegral addr :: Int64)
               else do
                 -- Standard location at offset 20
@@ -1205,7 +1212,7 @@ parseDataspaceMessage lengthSize msgData
           dimSize = lengthSize
       
       -- Parse dataspace type (v2 only)
-      dsType <- case version of
+      dsType' <- case version of
         DataspaceV2 -> Just <$> parseDataspaceType typeByte
         DataspaceV1 -> pure Nothing
       
@@ -1220,17 +1227,17 @@ parseDataspaceMessage lengthSize msgData
                    pure (Just maxDs)
                  else pure Nothing
       
-      pure $ HDF5Dataspace version dimensionality hasMaxDims dsType dims maxDims
+      pure $ HDF5Dataspace version dimensionality hasMaxDims dsType' dims maxDims
   where
     parseDimensions :: Int -> Int -> Int -> Either HDF5ParseError [Word64]
     parseDimensions 0 _ _ = Right []
     parseDimensions n offset sz
-      | fromIntegral (BL.length msgData) < fromIntegral (offset + sz) =
+      | BL.length msgData < fromIntegral (offset + sz) =
           Left $ TruncatedData $ "Not enough bytes for dimension at offset " ++ show offset
       | otherwise = do
           dim <- case sz of
-            4 -> word32LEAt msgData (fromIntegral offset) >>= \w -> pure (fromIntegral w :: Word64)
-            8 -> word64LEAt msgData (fromIntegral offset)
+            4 -> word32LEAt msgData (fromIntegral offset :: Int64) >>= \w -> pure (fromIntegral w :: Word64)
+            8 -> word64LEAt msgData (fromIntegral offset :: Int64)
             _ -> Left $ CorruptedMetadata $ "Invalid length size: " ++ show sz
           rest <- parseDimensions (n - 1) (offset + sz) sz
           pure (dim : rest)
@@ -1259,8 +1266,8 @@ parseDataLayoutMessage offsetSize msgData
     parseCompactLayout ver msgData' = do
       -- Version 3: bytes 2-3 are size
       size <- word16LEAt msgData' 2
-      let dataStart = 4
-          rawData = BL.drop (fromIntegral dataStart) msgData'
+      let dataStart = (4 :: Int64)
+          rawData = BL.drop dataStart msgData'
       pure $ CompactLayout ver size rawData
     
     parseContiguousLayout ver offSz msgData' = do
@@ -1294,8 +1301,8 @@ parseDataLayoutMessage offsetSize msgData
       
       -- Element size at end (4 bytes)
       let elemSizeOffset = chunkDimsStart + numDims * 4
-      elemSize <- if fromIntegral (BL.length msgData') >= elemSizeOffset + 4
-                  then word32LEAt msgData' (fromIntegral elemSizeOffset)
+      elemSize <- if BL.length msgData' >= fromIntegral (elemSizeOffset + 4)
+                  then word32LEAt msgData' (fromIntegral elemSizeOffset :: Int64)
                   else pure 0  -- Default if not present
       
       pure $ ChunkedLayout ver dimensionality addr chunkDims elemSize
@@ -1303,10 +1310,10 @@ parseDataLayoutMessage offsetSize msgData
     parseChunkDims :: Int -> Int -> BL.ByteString -> Either HDF5ParseError [Word32]
     parseChunkDims 0 _ _ = Right []
     parseChunkDims n offset msgData'
-      | fromIntegral (BL.length msgData') < fromIntegral (offset + 4) =
+      | BL.length msgData' < fromIntegral (offset + 4) =
           Left $ TruncatedData $ "Not enough bytes for chunk dimension at offset " ++ show offset
       | otherwise = do
-          dim <- word32LEAt msgData' (fromIntegral offset)
+          dim <- word32LEAt msgData' (fromIntegral offset :: Int64)
           rest <- parseChunkDims (n - 1) (offset + 4) msgData'
           pure (dim : rest)
 
@@ -1338,7 +1345,7 @@ parseFilterPipelineMessage msgData
     parseFilters :: Int -> Int -> [HDF5Filter] -> Either HDF5ParseError [HDF5Filter]
     parseFilters 0 _ acc = Right (reverse acc)
     parseFilters n offset acc
-      | fromIntegral (BL.length msgData) < fromIntegral (offset + 6) =
+      | BL.length msgData < fromIntegral offset + (6 :: Int64) =
           Left $ TruncatedData $ "Not enough bytes for filter at offset " ++ show offset
       | otherwise = do
           filterIDWord <- word16LEAt msgData (fromIntegral offset)
@@ -1366,7 +1373,7 @@ parseFilterPipelineMessage msgData
     parseClientData :: Int -> Int -> [Word32] -> Either HDF5ParseError [Word32]
     parseClientData 0 _ acc = Right (reverse acc)
     parseClientData n offset acc
-      | fromIntegral (BL.length msgData) < fromIntegral (offset + 4) =
+      | BL.length msgData < fromIntegral offset + (4 :: Int64) =
           Left $ TruncatedData $ "Not enough bytes for client data at offset " ++ show offset
       | otherwise = do
           val <- word32LEAt msgData (fromIntegral offset)
@@ -1445,15 +1452,15 @@ parseObjectHeaderMessages lengthSize offsetSize bs
   where
     go :: Int64 -> [ObjectHeaderMessage] -> Either HDF5ParseError [ObjectHeaderMessage]
     go offset msgs
-      | offset >= min 4096 (fromIntegral (BL.length bs)) = Right (reverse msgs)
-      | fromIntegral (BL.length bs) < offset + 8 = Right (reverse msgs)
+      | offset >= min 4096 (BL.length bs) = Right (reverse msgs)
+      | BL.length bs < offset + 8 = Right (reverse msgs)
       | otherwise = do
           msgType <- word16LEAt bs offset
           msgSz16 <- word16LEAt bs (offset + 2)
           
           let msgSz = fromIntegral msgSz16 :: Int64
               -- Message data starts at offset + 8 (skip 8-byte header)
-              msgData = BL.take (fromIntegral msgSz) (BL.drop (fromIntegral offset + 8) bs)
+              msgData = BL.take msgSz (BL.drop (offset + 8) bs)
               -- Padding: round up to 8-byte boundary
               totalMsgBytes = 8 + msgSz  -- header + data
               pad = ((8 - (totalMsgBytes `mod` 8)) `mod` 8) :: Int64
@@ -1538,20 +1545,6 @@ parseDatatypeMessageV1 msgData
             _ -> Left $ DatatypeParseFailed $ "Unknown datatype class: " ++ show datatypeClass
         Left err -> Left err
 
--- | Extract symbol table message data and parse it
---   Symbol table message (type 0x0011) format:
---   - Offset O: Address of v1 B-tree root
---   - Offset O: Address of local heap
-parseSymbolTableMessage :: BL.ByteString -> Int64 -> Either HDF5ParseError (Word64, Word64)
-parseSymbolTableMessage fileData offset
-  | fromIntegral (BL.length fileData) < offset + 16 = 
-    Left $ TruncatedData $ "Symbol table message at offset " ++ show offset ++ " requires 16 bytes"
-  | otherwise =
-    do
-      btreeAddr <- word64LEAt fileData offset
-      heapAddr <- word64LEAt fileData (offset + 8)
-      pure (btreeAddr, heapAddr)
-
 -- | Parse v1 B-tree node header
 --   Format:
 --   - 4 bytes: Signature "TREE"
@@ -1561,10 +1554,10 @@ parseSymbolTableMessage fileData offset
 --   - Then: Entries (format depends on node type)
 parseV1BTreeNode :: BL.ByteString -> Int64 -> Either HDF5ParseError (Word8, Word8, Word16)
 parseV1BTreeNode fileData offset
-  | fromIntegral (BL.length fileData) < offset + 8 = 
+  | BL.length fileData < offset + 8 = 
     Left $ TruncatedData $ "B-tree node at offset " ++ show offset ++ " requires 8 bytes"
   | otherwise =
-    let sig = BL.take 4 (BL.drop (fromIntegral offset) fileData)
+    let sig = BL.take 4 (BL.drop offset fileData)
     in if sig == BL.pack [0x54, 0x52, 0x45, 0x45] -- "TREE"
        then do
          nodeType <- byteAt fileData (offset + 4)
@@ -1642,7 +1635,7 @@ parseBTreeLeafEntries fileData offset numEntries
     -- SIMPLIFIED: For now, extract ASCII strings in the vicinity of entries
     -- FUTURE: Properly parse symbol table entry structures
     let entryRegion = BL.take (fromIntegral numEntries * 32) 
-                               (BL.drop (fromIntegral offset + 8) fileData)
+                               (BL.drop (offset + 8) fileData)
         candidates = extractAsciiStringsFromChunk entryRegion
     in filter isDatasetName candidates
 
@@ -1660,73 +1653,15 @@ data LocalHeapHeader = LocalHeapHeader
   , lhDataAddress   :: Word64          -- ^ Address of actual heap data
   } deriving (Show, Eq)
 
--- | Parse complete local heap header
---   Local heap format (version 0):
---   - 4 bytes: Signature "HEAP"
---   - 1 byte: Version
---   - 3 bytes: Reserved
---   - 8 bytes: Heap data size
---   - 8 bytes: Offset to free list head  
---   - 8 bytes: Address of data in heap
-parseLocalHeapHeader :: BL.ByteString -> Int64 -> Either HDF5ParseError LocalHeapHeader
-parseLocalHeapHeader fileData offset
-  | fromIntegral (BL.length fileData) < offset + 32 = 
-    Left $ TruncatedData $ "Local heap header at offset " ++ show offset ++ " requires 32 bytes"
-  | otherwise =
-    do
-      -- Validate signature
-      sig <- byteStringAt fileData offset 4
-      if sig /= BL.pack [0x48, 0x45, 0x41, 0x50]  -- "HEAP"
-        then Left $ HeapParseFailed $ "Invalid heap signature at offset " ++ show offset
-        else do
-          -- Parse header fields
-          version <- byteAt fileData (offset + 4)
-          when (version > 0) $
-            Left $ HeapParseFailed $ "Unsupported heap version " ++ show version
-          
-          -- Read heap data size (8 bytes at offset 8)
-          dataSize <- word64LEAt fileData (offset + 8)
-          
-          -- Read free list offset (8 bytes at offset 16)
-          freeListOffset <- word64LEAt fileData (offset + 16)
-          
-          -- Read data address (8 bytes at offset 24)
-          dataAddress <- word64LEAt fileData (offset + 24)
-          
-          pure $ LocalHeapHeader version dataSize freeListOffset dataAddress
-
--- | Old interface for backward compatibility
---   Returns offset of heap data start
-parseLocalHeapOffset :: BL.ByteString -> Int64 -> Either HDF5ParseError Int64
-parseLocalHeapOffset fileData offset
-  | fromIntegral (BL.length fileData) < offset + 32 = 
-    Left $ TruncatedData $ "Local heap header at offset " ++ show offset ++ " requires 32 bytes"
-  | otherwise =
-    do
-      header <- parseLocalHeapHeader fileData offset
-      -- Data starts at the address specified in the header
-      pure (fromIntegral (lhDataAddress header))
-
--- | Extract null-terminated string from heap data at given offset
-extractHeapString :: BL.ByteString -> Int64 -> Maybe String
-extractHeapString fileData offset
-  | fromIntegral (BL.length fileData) <= offset = Nothing
-  | otherwise =
-    let chunk = BL.drop (fromIntegral offset) fileData
-        bytes = BL.takeWhile (/= 0) chunk
-    in if BL.null bytes
-       then Nothing
-       else Just (BL.unpack bytes >>= (\b -> if b >= 32 && b < 127 then [toEnum (fromIntegral b)] else []))
-
 -- | Extract multiple null-terminated strings from heap starting at offset
 --   Useful for extracting all dataset names from a local heap
 extractHeapStringsFromOffset :: BL.ByteString -> Int64 -> Maybe [String]
 extractHeapStringsFromOffset fileData offset
-  | fromIntegral (BL.length fileData) <= offset = Nothing
+  | BL.length fileData <= offset = Nothing
   | otherwise =
     -- Scan forward and extract all valid ASCII strings separated by null bytes
     -- Limit scan to 1KB to prevent excessive memory use
-    let chunk = BL.take 1024 $ BL.drop (fromIntegral offset) fileData
+    let chunk = BL.take 1024 $ BL.drop offset fileData
         go :: [String] -> BL.ByteString -> [String]
         go acc remaining
           | BL.null remaining = reverse acc
@@ -1747,7 +1682,7 @@ extractHeapStringsFromOffset fileData offset
 -- | Extract all strings from local heap region  
 extractHeapStrings :: BL.ByteString -> Int64 -> Maybe [String]
 extractHeapStrings fileData offset
-  | fromIntegral (BL.length fileData) < fromIntegral offset + 100 = Nothing
+  | BL.length fileData < offset + (100 :: Int64) = Nothing
   | otherwise =
     -- Use extractHeapStringsFromOffset which properly parses null-terminated strings
     -- Skip the heap header (32 bytes) and start parsing from the data region
@@ -1777,110 +1712,15 @@ parseSymbolTableForDatasets fileData btreeAddr heapAddr
             allNames = nub (names ++ heapStrings)
         in allNames
 
--- | Assemble HDF5DatasetInfo from parsed object header messages
---   Validates that required messages are present
-assembleDatasetInfo :: String -> Word64 -> [ObjectHeaderMessage] -> Either HDF5ParseError HDF5DatasetInfo
-assembleDatasetInfo name offset messages = do
-  -- Extract required messages
-  dataspace <- case [ds | DataspaceMessage ds <- messages] of
-    (ds:_) -> Right ds
-    [] -> Left $ CorruptedMetadata $ "Dataset '" ++ name ++ "' missing required Dataspace message"
-  
-  datatype <- case [dt | DatatypeMessage dt <- messages] of
-    (dt:_) -> Right dt
-    [] -> Left $ CorruptedMetadata $ "Dataset '" ++ name ++ "' missing required Datatype message"
-  
-  layout <- case [ly | DataLayoutMessage ly <- messages] of
-    (ly:_) -> Right ly
-    [] -> Left $ CorruptedMetadata $ "Dataset '" ++ name ++ "' missing required DataLayout message"
-  
-  -- Extract optional messages
-  let filters = case [fp | FilterPipelineMessage fp <- messages] of
-        (fp:_) -> Just fp
-        [] -> Nothing
-  
-  let fillValue = case [fv | FillValueMessage fv <- messages] of
-        (fv:_) -> Just fv
-        [] -> Nothing
-  
-  pure $ HDF5DatasetInfo name dataspace datatype layout filters fillValue offset
-
--- | Fallback: Extract dataset-like names using heuristics
---   Used when full B-tree parsing is deferred
--- DEPRECATED: Heuristic string scanning removed. Use proper metadata parsing instead.
--- This function is no longer used and kept only for backward compatibility.
-extractDatasetNamesViaHeuristic :: BL.ByteString -> [HDF5DatasetInfo]
-extractDatasetNamesViaHeuristic _ = []  -- Return empty - heuristics are disabled
-
 -- | Search for Object Header (OHDR) signature in ByteString using multiple strategies
 --   OHDR signature: 0x4F 0x48 0x44 0x52 ("OHDR")
 --   Tries multiple search strategies with early termination:
 --   1. Forward scan from offset 32 to 512 (bounded search)
 --   2. Fixed offset checks at common locations (48, 64, 96, 128, 256)
---   3. Broader search from 16 onwards if previous strategies fail
-findObjectHeaderSignature :: BL.ByteString -> Maybe Int64
-findObjectHeaderSignature bs = 
-  -- Strategy 1: Bounded forward scan (most common case)
-  case searchRange bs 32 512 of
-    Just addr -> Just addr
-    Nothing ->
-      -- Strategy 2: Try fixed offset locations (common placements)
-      let fixedOffsets = [48, 64, 96, 128, 256, 512, 1024]
-          tryFixed [] = Nothing
-          tryFixed (off:rest) = case checkOHDR bs off of
-            Just addr -> Just addr
-            Nothing -> tryFixed rest
-      in case tryFixed fixedOffsets of
-        Just addr -> Just addr
-        Nothing ->
-          -- Strategy 3: Broader search from beginning (last resort)
-          searchRange bs 16 (min 4096 (BL.length bs))
-  where
-    -- Check if OHDR signature exists at specific offset
-    checkOHDR :: BL.ByteString -> Int64 -> Maybe Int64
-    checkOHDR bs' offset = 
-      case (byteAt bs' offset, byteAt bs' (offset + 1), 
-            byteAt bs' (offset + 2), byteAt bs' (offset + 3)) of
-        (Right 0x4F, Right 0x48, Right 0x44, Right 0x52) -> Just offset
-        _ -> Nothing
-    
-    -- Scan a range of offsets for OHDR signature
-    searchRange :: BL.ByteString -> Int64 -> Int64 -> Maybe Int64
-    searchRange bs' startOff endOff =
-      let search offset
-            | offset >= endOff = Nothing
-            | offset >= fromIntegral (BL.length bs') - 4 = Nothing
-            | otherwise = case checkOHDR bs' offset of
-                Just addr -> Just addr
-                Nothing -> search (offset + 1)
-      in search startOff
-
 -- | Parse extended superblock v0/v1 header to extract metadata
 --   Extended superblock structure (after main 32-byte superblock):
 --   - Root group object header address (4 or 8 bytes, little-endian)
 --   Followed by optional additional fields in later versions
-parseExtendedSuperblockV0V1Header :: BL.ByteString -> Int -> Int -> HDF5ParserM Int64
-parseExtendedSuperblockV0V1Header bs offsetSz _lenSz = do
-  -- Search for OHDR signature which marks the start of object header
-  -- The extended superblock location is determined by finding this signature
-  case findObjectHeaderSignature bs of
-    Nothing -> 
-      Left $ CorruptedMetadata "Extended superblock: Could not locate object header signature (OHDR)"
-    Just headerAddr -> do
-      -- Verify we found a valid OHDR header
-      -- The OHDR signature should be at the beginning of the object header
-      sig1 <- byteAt bs headerAddr
-      sig2 <- byteAt bs (headerAddr + 1)
-      sig3 <- byteAt bs (headerAddr + 2)
-      sig4 <- byteAt bs (headerAddr + 3)
-      
-      if sig1 == 0x4F && sig2 == 0x48 && sig3 == 0x44 && sig4 == 0x52
-        then do
-          -- Valid OHDR found - return its address as the root group object header location
-          -- The actual data in this header will be parsed separately by parseObjectHeaderMessages
-          pure headerAddr
-        else
-          Left $ CorruptedMetadata "Extended superblock: Found OHDR signature mismatch"
 
 -- | Parse extended superblock v0/v1 to retrieve actual root group address
 --   When extended addressing is detected (-1 at offset 0x20), the structure is:
@@ -1906,7 +1746,7 @@ parseExtendedSuperblockV0V1Header bs offsetSz _lenSz = do
 --   4. Validate all addresses are within file bounds
 --   5. Return all three addresses for dataset discovery
 parseExtendedSuperblocV0V1 :: BL.ByteString -> Int -> Int -> HDF5ParserM (Int64, Word64, Word64)
-parseExtendedSuperblocV0V1 bs offsetSz lenSz = do
+parseExtendedSuperblocV0V1 bs _offsetSz _lenSz = do
   -- Extended addressing: root address at offset 0x40, symbol table info at 0x50/0x58
   rootAddr <- word64LEAt bs 0x40
   btreeAddr <- word64LEAt bs 0x50
@@ -1915,7 +1755,7 @@ parseExtendedSuperblocV0V1 bs offsetSz lenSz = do
   let rootAddrInt = fromIntegral rootAddr :: Int64
   
   -- Validate root address is within file bounds
-  if rootAddrInt < 0 || rootAddrInt >= fromIntegral (BL.length bs)
+  if rootAddrInt < 0 || rootAddrInt >= BL.length bs
     then Left $ CorruptedMetadata $ "Extended addressing: Invalid root address 0x" 
                                   ++ showHex rootAddr ""
     else pure (rootAddrInt, btreeAddr, heapAddr)
@@ -1973,10 +1813,10 @@ discoverDatasets bs
                 in map createPlaceholderDatasetInfo names
           else
             -- Standard addressing: parse object header for symbol table message
-            let objHeaderOffset = fromIntegral rootAddr :: Int64
-            in if rootAddr < 0 || fromIntegral objHeaderOffset >= BL.length bs
+            let objHeaderOffset = rootAddr :: Int64
+            in if rootAddr < 0 || objHeaderOffset >= BL.length bs
                then []
-               else case parseObjectHeaderMessages offsetSz lenSz (BL.drop (fromIntegral objHeaderOffset) bs) of
+               else case parseObjectHeaderMessages offsetSz lenSz (BL.drop objHeaderOffset bs) of
                  Left _ -> []
                  Right msgs ->
                    -- Extract symbol table message (type 0x0011)
@@ -2008,17 +1848,7 @@ discoverDatasets bs
       in HDF5DatasetInfo name placeholderDataspace placeholderDatatype placeholderLayout Nothing Nothing 0
 
 
--- | Extract dimension information from HDF5 file (wrapper around discoverDatasets)
-extractDatasetDimensions :: BL.ByteString -> [(String, [Int])]
-extractDatasetDimensions bs =
-  let datasets = discoverDatasets bs
-  in map (\d -> 
-    let dims = map fromIntegral (dsDimensions (dsiDataspace d)) :: [Int]
-        dimType = case length dims of
-          1 -> "1D"
-          2 -> "2D"
-          _ -> "ND"
-    in (dimType, dims)) datasets
+
     
 
 

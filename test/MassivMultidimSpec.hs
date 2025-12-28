@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module MassivMultidimSpec where
+module MassivMultidimSpec (spec) where
 
 import Test.Hspec
 import Data.HDF5.Direct.Massiv
@@ -128,6 +128,3 @@ spec = do
             n2 `shouldBe` 4
           _ -> fail "Failed to query 2D dimensions"
         _ -> fail "Failed to extract dimensions"
-
-main :: IO ()
-main = hspec spec

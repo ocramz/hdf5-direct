@@ -1,17 +1,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module QuickCheckSpec
-  ( main
-  , spec
+  ( spec
   ) where
 
 import Test.Hspec
 import Test.QuickCheck
-import Data.Word (Word8, Word16, Word32)
-import Data.Binary.Put (runPut, putWord8, putWord16be, putWord32be)
-import qualified Data.ByteString.Lazy as BL
-import Data.Binary.Get (runGet)
-import qualified Data.Binary.Get as Get
+import Data.Word (Word16, Word32)
 
 import Data.HDF5.Direct.Internal
   ( ByteOrder(..)
@@ -27,17 +23,7 @@ import Data.HDF5.Direct.Internal
   , parseByteOrder
   , parsePaddingType
   , parseCharacterSet
-  , parseFixedPoint
-  , parseFloatingPoint
-  , parseTime
-  , parseString
-  , parseBitfield
-  , parseOpaque
   )
-
-
-main :: IO ()
-main = hspec spec
 
 -- Arbitrary instances for property testing
 instance Arbitrary ByteOrder where
