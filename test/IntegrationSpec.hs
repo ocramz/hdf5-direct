@@ -14,6 +14,8 @@ import Control.Exception (catch, try, SomeException, throwIO)
 import Control.Monad (foldM, forM, forM_, when)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist)
 import System.FilePath (takeExtension, (</>))
+import System.IO (Handle, hClose)
+import System.IO.Temp (withSystemTempFile)
 
 import Data.HDF5.Direct.Internal
   ( HDF5Exception(..)
@@ -71,17 +73,19 @@ tryHDF5 action = fmap Right action `catch` (\(e :: HDF5Exception) -> return (Lef
 -- Mmap Debugging Helpers
 -- ============================================================================
 
--- | Create a test file of specified size filled with repeated pattern
-createTestFile :: FilePath -> Int -> IO ()
-createTestFile path size = 
-  BL.writeFile path $ BL.replicate (fromIntegral size) 0xAB
+-- | Create a test file of specified size filled with repeated pattern using temporary file
+withTestFile :: Int -> (FilePath -> IO a) -> IO a
+withTestFile size action = 
+  withSystemTempFile "mmap-test.bin" $ \path handle -> do
+    BL.hPut handle $ BL.replicate (fromIntegral size) 0xAB
+    hClose handle
+    action path
 
 -- | Test mmapFileRegion with a file of given size
 -- Returns (file created successfully, mmap succeeded, ByteString length matches)
-testMmapWithSize :: FilePath -> Int -> IO (Bool, Bool, Bool)
-testMmapWithSize testPath fileSize = do
-  -- Create test file
-  createTestFile testPath fileSize
+testMmapWithSize :: Int -> IO (Bool, Bool, Bool)
+testMmapWithSize fileSize = 
+  withTestFile fileSize $ \testPath -> do
   
   -- Try to mmap and read it
   mmapResult <- try $ do
@@ -182,86 +186,78 @@ spec = do
   -- ========================================================================
   describe "MMAP Diagnostics - File Size Progression" $ do
     it "mmapFileRegion works with 10KB test file" $ do
-      let testPath = "test-data/mmap-test-10kb.bin"
-      (created, mmapped, lenMatch) <- testMmapWithSize testPath 10240
+      (created, mmapped, lenMatch) <- testMmapWithSize 10240
       created `shouldBe` True
       mmapped `shouldBe` True
       lenMatch `shouldBe` True
 
     it "mmapFileRegion works with 100KB test file" $ do
-      let testPath = "test-data/mmap-test-100kb.bin"
-      (created, mmapped, lenMatch) <- testMmapWithSize testPath 102400
+      (created, mmapped, lenMatch) <- testMmapWithSize 102400
       created `shouldBe` True
       mmapped `shouldBe` True
       lenMatch `shouldBe` True
 
     it "mmapFileRegion works with 1MB test file" $ do
-      let testPath = "test-data/mmap-test-1mb.bin"
-      (created, mmapped, lenMatch) <- testMmapWithSize testPath 1048576
+      (created, mmapped, lenMatch) <- testMmapWithSize 1048576
       created `shouldBe` True
       mmapped `shouldBe` True
       lenMatch `shouldBe` True
 
   describe "MMAP Diagnostics - Strict vs Lazy Evaluation" $ do
     it "mmapFileRegion + forced evaluation with small file succeeds" $ do
-      let testPath = "test-data/mmap-test-strict-small.bin"
-      createTestFile testPath 102400
-      result <- try $ do
-        bs <- mmapFileRegion testPath Nothing
-        forceByteString bs  -- Force strict evaluation within mmap scope
-        return (True :: Bool)
-      case result of
-        Left (e :: HDF5Exception) -> expectationFailure $ "Failed with forced eval: " ++ show e
-        Right True -> pure ()
+      withTestFile 102400 $ \testPath -> do
+        result <- try $ do
+          bs <- mmapFileRegion testPath Nothing
+          forceByteString bs  -- Force strict evaluation within mmap scope
+          return (True :: Bool)
+        case result of
+          Left (e :: HDF5Exception) -> expectationFailure $ "Failed with forced eval: " ++ show e
+          Right True -> pure ()
 
     it "mmapFileRegion + lazy evaluation works with small file" $ do
-      let testPath = "test-data/mmap-test-lazy-small.bin"
-      createTestFile testPath 102400
-      result <- try $ do
-        bs <- mmapFileRegion testPath Nothing
-        -- Don't force evaluation - use lazily
-        let len = BL.length bs
-        return (len > 0)
-      case result of
-        Left (e :: HDF5Exception) -> expectationFailure $ "Failed with lazy eval: " ++ show e
-        Right True -> pure ()
+      withTestFile 102400 $ \testPath -> do
+        result <- try $ do
+          bs <- mmapFileRegion testPath Nothing
+          -- Don't force evaluation - use lazily
+          let len = BL.length bs
+          return (len > 0)
+        case result of
+          Left (e :: HDF5Exception) -> expectationFailure $ "Failed with lazy eval: " ++ show e
+          Right True -> pure ()
 
   describe "MMAP Diagnostics - withMmapFile vs mmapFileRegion" $ do
     it "mmapFileRegion called inside withMmapFile preserves ByteString" $ do
-      let testPath = "test-data/mmap-test-bracket.bin"
-      createTestFile testPath 102400
-      result <- try $ withMmapFile testPath $ \_ -> do
-        bs <- mmapFileRegion testPath Nothing
-        let len = BL.length bs
-        return (len == 102400)
-      case result of
-        Left (e :: HDF5Exception) -> expectationFailure $ "Failed in bracket: " ++ show e
-        Right True -> pure ()
+      withTestFile 102400 $ \testPath -> do
+        result <- try $ withMmapFile testPath $ \_ -> do
+          bs <- mmapFileRegion testPath Nothing
+          let len = BL.length bs
+          return (len == 102400)
+        case result of
+          Left (e :: HDF5Exception) -> expectationFailure $ "Failed in bracket: " ++ show e
+          Right True -> pure ()
 
     it "mmapFileRegion called outside withMmapFile scope works" $ do
-      let testPath = "test-data/mmap-test-outside.bin"
-      createTestFile testPath 102400
-      result <- try $ do
-        bs <- mmapFileRegion testPath Nothing
-        let len = BL.length bs
-        return (len == 102400)
-      case result of
-        Left (e :: HDF5Exception) -> expectationFailure $ "Failed outside bracket: " ++ show e
-        Right True -> pure ()
+      withTestFile 102400 $ \testPath -> do
+        result <- try $ do
+          bs <- mmapFileRegion testPath Nothing
+          let len = BL.length bs
+          return (len == 102400)
+        case result of
+          Left (e :: HDF5Exception) -> expectationFailure $ "Failed outside bracket: " ++ show e
+          Right True -> pure ()
 
   describe "MMAP Diagnostics - Computation Path Isolation" $ do
     it "mmapFileRegion alone with large file succeeds" $ do
       -- Test if mmapFileRegion itself is safe with larger sizes
-      let testPath = "test-data/mmap-test-5mb.bin"
-      createTestFile testPath 5242880  -- 5MB
-      result <- try $ do
-        bs <- mmapFileRegion testPath Nothing
-        let len = fromIntegral (BL.length bs) :: Int
-        putStrLn $ "    Successfully mmapped 5MB file, length: " ++ show len
-        return (len == 5242880)
-      case result of
-        Left (e :: HDF5Exception) -> expectationFailure $ "Mmap failed on 5MB: " ++ show e
-        Right True -> pure ()
+      withTestFile 5242880 $ \testPath -> do  -- 5MB
+        result <- try $ do
+          bs <- mmapFileRegion testPath Nothing
+          let len = fromIntegral (BL.length bs) :: Int
+          putStrLn $ "    Successfully mmapped 5MB file, length: " ++ show len
+          return (len == 5242880)
+        case result of
+          Left (e :: HDF5Exception) -> expectationFailure $ "Mmap failed on 5MB: " ++ show e
+          Right True -> pure ()
 
   describe "MMAP Diagnostics - Kosarak File Safety Checks" $ do
 
